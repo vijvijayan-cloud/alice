@@ -1,0 +1,5 @@
+Flask
+pyotp
+requests
+alice-blue
+gunicorn
