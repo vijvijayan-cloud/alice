@@ -1,6 +1,5 @@
-Flask==2.3.3
-pyotp==2.9.0
-yfinance==0.2.38
-pandas==2.1.4
-alice-blue==1.0.1
-requests==2.31.0
+Flask
+pyotp
+yfinance
+alice-blue
+requests
