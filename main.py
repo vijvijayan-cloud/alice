@@ -6,11 +6,17 @@ import yfinance as yf
 
 app = Flask(__name__)
 
-USER_ID = os.getenv("ALICE_USER_ID", "").strip()
-PASSWORD = os.getenv("ALICE_PASSWORD", "").strip()
-TOTP_SECRET = os.getenv("ALICE_TOTP_SECRET", "").strip().replace(" ", "")
-APP_ID = os.getenv("ALICE_APP_ID", "").strip()
-APP_SECRET = os.getenv("ALICE_APP_SECRET", "").strip()
+def clean_env(name):
+    v = os.getenv(name, "")
+    return v.strip().replace(" ", "").replace("\n", "").replace("\r", "").replace('"', "").replace("'", "")
+
+USER_ID = clean_env("ALICE_USER_ID")
+PASSWORD = clean_env("ALICE_PASSWORD")
+TOTP_SECRET = clean_env("ALICE_TOTP_SECRET")
+APP_ID = clean_env("ALICE_APP_ID")
+APP_SECRET = clean_env("ALICE_APP_SECRET")
+# DOB YEAR - Idhu thaan Mukkiyam - 4 Digit Year mattum Eg: 1998
+DOB_YEAR = clean_env("ALICE_YEAR") or clean_env("ALICE_DOB_YEAR") or clean_env("ALICE_2FA")
 MODE = os.getenv("MODE", "PAPER")
 try:
     LOTS = int(os.getenv("LOTS", "1"))
@@ -47,86 +53,90 @@ def alice_login():
             return True
 
         from alice_blue import AliceBlue
-        try:
-            sig = str(inspect.signature(AliceBlue.login_and_get_sessionID))
-        except Exception as e:
-            sig = f"No Sig: {e}"
 
-        # DEBUG - APP_ID / SECRET Full-a Kaamikka Vendaam - First 3 Letter Mattum
-        state["debug"] = f"SIG: {sig} | USER:{USER_ID} PASS_LEN:{len(PASSWORD)} TOTP_LEN:{len(TOTP_SECRET)} APP_ID:{APP_ID} APP_ID_LEN:{len(APP_ID)} SECRET_START:{APP_SECRET[:3]}*** SECRET_LEN:{len(APP_SECRET)}"
+        try:
+            totp = pyotp.TOTP(TOTP_SECRET).now() if TOTP_SECRET else ""
+        except:
+            totp = ""
+
+        # DOB Year First - TOTP Second
+        twofa_list = []
+        if DOB_YEAR:
+            twofa_list.append(("DOB_YEAR", DOB_YEAR))
+        if totp:
+            twofa_list.append(("TOTP", totp))
+        if not twofa_list:
+            twofa_list.append(("EMPTY", ""))
+
+        state["debug"] = f"USER:{USER_ID} PASS_LEN:{len(PASSWORD)} APP_ID:{APP_ID} LEN:{len(APP_ID)} SECRET:{APP_SECRET[:3]}*** LEN:{len(APP_SECRET)} DOB_YEAR:{DOB_YEAR} TOTP:{totp}"
         print(state["debug"])
 
-        if not USER_ID or not PASSWORD or not TOTP_SECRET or not APP_SECRET or not APP_ID:
-            state["login"] = "LIVE ERROR - Oru Env Missing"
+        if not USER_ID or not PASSWORD or not APP_SECRET or not APP_ID:
+            state["login"] = "LIVE ERROR - USER/PASS/APP_ID/SECRET Missing"
             return False
 
-        totp = pyotp.TOTP(TOTP_SECRET).now()
-        print(f"TOTP: {totp} USER: {USER_ID} APP_ID: {APP_ID}")
+        for label, twofa in twofa_list:
+            # TRY 1 - OFFICIAL - login_and_get_access_token + DOB
+            try:
+                print(f"Try AccessToken {label}={twofa} APP_ID={APP_ID}")
+                token = AliceBlue.login_and_get_access_token(username=USER_ID, password=PASSWORD, twoFA=twofa, api_secret=APP_SECRET, app_id=APP_ID)
+                print(f"Token: {str(token)[:20]}")
+                if token and len(str(token)) > 5:
+                    try:
+                        alice = AliceBlue(username=USER_ID, password=PASSWORD, access_token=token)
+                    except:
+                        alice = AliceBlue(username=USER_ID, access_token=token)
+                    state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY - AccessToken {label}"
+                    state["debug"] += f" | SUCCESS AccessToken {label}"
+                    return True
+                else:
+                    state["debug"] += f" | AccessToken {label} Empty"
+            except Exception as e:
+                print(f"AccessToken {label} Failed: {e}")
+                state["debug"] += f" | AccessToken {label} Failed: {e}"
 
-        # ---- TRY 1 - CORRECT ORDER - (USER, PASS, TOTP, APP_ID, SECRET) ----
-        # SIG: (username, password, twoFA, app_id, api_secret) - Idhu thaan Correct
-        try:
-            print(f"Try1 CORRECT ORDER: APP_ID={APP_ID} SECRET_LEN={len(APP_SECRET)}")
-            sid = AliceBlue.login_and_get_sessionID(USER_ID, PASSWORD, totp, APP_ID, APP_SECRET)
-            print(f"Try1 SID: {str(sid)[:20]} LEN:{len(str(sid)) if sid else 0}")
-            if sid and len(str(sid)) > 5:
-                alice = AliceBlue(username=USER_ID, session_id=sid)
-                state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY"
-                state["debug"] += " | SUCCESS Try1 CORRECT ORDER"
-                return True
-            else:
-                state["debug"] += f" | Try1 Empty SID: {sid}"
-        except Exception as e:
-            print(f"Try1 Failed: {e} {traceback.format_exc()}")
-            state["debug"] += f" | Try1 Failed: {e}"
+            # TRY 2 - SessionID + DOB - CORRECT ORDER (USER, PASS, TOTP, APP_ID, SECRET)
+            try:
+                print(f"Try SessionID {label}={twofa}")
+                sid = AliceBlue.login_and_get_sessionID(USER_ID, PASSWORD, twofa, APP_ID, APP_SECRET)
+                print(f"SID: {str(sid)[:20]}")
+                if sid and len(str(sid)) > 5:
+                    alice = AliceBlue(username=USER_ID, session_id=sid)
+                    state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY - SessionID {label}"
+                    state["debug"] += f" | SUCCESS SessionID {label}"
+                    return True
+                else:
+                    state["debug"] += f" | SessionID {label} Empty"
+            except Exception as e:
+                print(f"SessionID {label} Failed: {e}")
+                state["debug"] += f" | SessionID {label} Failed: {e}"
 
-        # ---- TRY 2 - SWAPPED - APP_ID / SECRET Maathi Pottirundha ----
-        # APP_ID: XgdREi... nu Irundha, Adhu Secret-a Irukkalam
-        try:
-            print(f"Try2 SWAPPED: APP_ID={APP_SECRET} SECRET={APP_ID}")
-            sid = AliceBlue.login_and_get_sessionID(USER_ID, PASSWORD, totp, APP_SECRET, APP_ID)
-            print(f"Try2 SID: {str(sid)[:20]}")
-            if sid and len(str(sid)) > 5:
-                alice = AliceBlue(username=USER_ID, session_id=sid)
-                state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY - SWAPPED ID/SECRET WORKED - Render la Maathunga"
-                state["debug"] += " | SUCCESS Try2 SWAPPED - Render la APP_ID/SECRET Maathi Irukku"
-                return True
-            else:
-                state["debug"] += f" | Try2 Empty: {sid}"
-        except Exception as e:
-            print(f"Try2 Failed: {e}")
-            state["debug"] += f" | Try2 Failed: {e}"
+            # TRY 3 - APP_ID = USERNAME - Sila perukku App ID = Username
+            try:
+                token = AliceBlue.login_and_get_access_token(username=USER_ID, password=PASSWORD, twoFA=twofa, api_secret=APP_SECRET, app_id=USER_ID)
+                if token and len(str(token)) > 5:
+                    try:
+                        alice = AliceBlue(username=USER_ID, password=PASSWORD, access_token=token)
+                    except:
+                        alice = AliceBlue(username=USER_ID, access_token=token)
+                    state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY - AppID=Username {label}"
+                    state["debug"] += f" | SUCCESS AppID=Username {label}"
+                    return True
+            except Exception as e:
+                state["debug"] += f" | AppID=Username {label} Failed: {e}"
 
-        # ---- TRY 3 - KWARGS CORRECT NAMES ----
-        try:
-            print("Try3 Kwargs")
-            sid = AliceBlue.login_and_get_sessionID(username=USER_ID, password=PASSWORD, twoFA=totp, app_id=APP_ID, api_secret=APP_SECRET)
-            if sid and len(str(sid)) > 5:
-                alice = AliceBlue(username=USER_ID, session_id=sid)
-                state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY"
-                state["debug"] += " | SUCCESS Try3 Kwargs"
-                return True
-            else:
-                state["debug"] += f" | Try3 Empty: {sid}"
-        except Exception as e:
-            print(f"Try3 Failed: {e}")
-            state["debug"] += f" | Try3 Failed: {e}"
+            # TRY 4 - SWAPPED - APP_ID / SECRET Maathi Pottirundha
+            try:
+                sid = AliceBlue.login_and_get_sessionID(USER_ID, PASSWORD, twofa, APP_SECRET, APP_ID)
+                if sid and len(str(sid)) > 5:
+                    alice = AliceBlue(username=USER_ID, session_id=sid)
+                    state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY - SWAPPED {label}"
+                    state["debug"] += f" | SUCCESS Swapped {label}"
+                    return True
+            except Exception as e:
+                state["debug"] += f" | Swapped {label} Failed: {e}"
 
-        # ---- TRY 4 - KWARGS SWAPPED ----
-        try:
-            sid = AliceBlue.login_and_get_sessionID(username=USER_ID, password=PASSWORD, twoFA=totp, app_id=APP_SECRET, api_secret=APP_ID)
-            if sid and len(str(sid)) > 5:
-                alice = AliceBlue(username=USER_ID, session_id=sid)
-                state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY - SWAPPED"
-                state["debug"] += " | SUCCESS Try4 Swapped Kwargs"
-                return True
-            else:
-                state["debug"] += f" | Try4 Empty: {sid}"
-        except Exception as e:
-            print(f"Try4 Failed: {e}")
-            state["debug"] += f" | Try4 Failed: {e}"
-
-        state["login"] = "LIVE ERROR - All 4 Tried - APP_ID/SECRET/PASS/TOTP la Onnu Thappu - Alice ANT la Check pannunga"
+        state["login"] = "LIVE ERROR - DOB Year Check pannunga - ALICE_YEAR la 4 Digit Year Podunga Eg: 1998"
         return False
     except Exception as e:
         state["login"] = f"LOGIN ERROR: {e}"
