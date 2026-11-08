@@ -1,4 +1,4 @@
-import os, time, pyotp, traceback, inspect, requests
+import os, time, pyotp, traceback, inspect
 from datetime import datetime, timedelta
 from flask import Flask, jsonify
 import threading
@@ -47,36 +47,32 @@ def alice_login():
             return True
 
         from alice_blue import AliceBlue
-
-        # DEBUG - Signature-a Site laye Kaamikka
         try:
             sig = str(inspect.signature(AliceBlue.login_and_get_sessionID))
         except Exception as e:
             sig = f"No Sig: {e}"
-        try:
-            init_sig = str(inspect.signature(AliceBlue.__init__))
-        except:
-            init_sig = "No Init Sig"
 
-        state["debug"] = f"SESSIONID SIG: {sig} | INIT: {init_sig} | USER:{USER_ID[:3]}*** LEN USER:{len(USER_ID)} PASS:{len(PASSWORD)} TOTP_SECRET:{len(TOTP_SECRET)} APP_ID:{APP_ID} APP_SECRET_LEN:{len(APP_SECRET)}"
+        # DEBUG - APP_ID / SECRET Full-a Kaamikka Vendaam - First 3 Letter Mattum
+        state["debug"] = f"SIG: {sig} | USER:{USER_ID} PASS_LEN:{len(PASSWORD)} TOTP_LEN:{len(TOTP_SECRET)} APP_ID:{APP_ID} APP_ID_LEN:{len(APP_ID)} SECRET_START:{APP_SECRET[:3]}*** SECRET_LEN:{len(APP_SECRET)}"
         print(state["debug"])
 
-        if not USER_ID or not PASSWORD or not TOTP_SECRET or not APP_SECRET:
-            state["login"] = "LIVE ERROR - Oru Env Missing - USER/PASS/TOTP/SECRET Check pannunga"
+        if not USER_ID or not PASSWORD or not TOTP_SECRET or not APP_SECRET or not APP_ID:
+            state["login"] = "LIVE ERROR - Oru Env Missing"
             return False
 
         totp = pyotp.TOTP(TOTP_SECRET).now()
-        print(f"TOTP Now: {totp} User: {USER_ID} AppID: {APP_ID}")
+        print(f"TOTP: {totp} USER: {USER_ID} APP_ID: {APP_ID}")
 
-        # ---- TRY 1 - POSITIONAL - Idhu thaan Correct - Kwarg Name Problem-a Thavirka ----
+        # ---- TRY 1 - CORRECT ORDER - (USER, PASS, TOTP, APP_ID, SECRET) ----
+        # SIG: (username, password, twoFA, app_id, api_secret) - Idhu thaan Correct
         try:
-            print("Try 1 Positional: (USER, PASS, TOTP, SECRET, APP_ID)")
-            sid = AliceBlue.login_and_get_sessionID(USER_ID, PASSWORD, totp, APP_SECRET, APP_ID)
-            print(f"Try1 SID: {str(sid)[:15]}")
+            print(f"Try1 CORRECT ORDER: APP_ID={APP_ID} SECRET_LEN={len(APP_SECRET)}")
+            sid = AliceBlue.login_and_get_sessionID(USER_ID, PASSWORD, totp, APP_ID, APP_SECRET)
+            print(f"Try1 SID: {str(sid)[:20]} LEN:{len(str(sid)) if sid else 0}")
             if sid and len(str(sid)) > 5:
                 alice = AliceBlue(username=USER_ID, session_id=sid)
                 state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY"
-                state["debug"] += " | SUCCESS Try1 Positional"
+                state["debug"] += " | SUCCESS Try1 CORRECT ORDER"
                 return True
             else:
                 state["debug"] += f" | Try1 Empty SID: {sid}"
@@ -84,30 +80,31 @@ def alice_login():
             print(f"Try1 Failed: {e} {traceback.format_exc()}")
             state["debug"] += f" | Try1 Failed: {e}"
 
-        # ---- TRY 2 - POSITIONAL WITHOUT APP_ID ----
+        # ---- TRY 2 - SWAPPED - APP_ID / SECRET Maathi Pottirundha ----
+        # APP_ID: XgdREi... nu Irundha, Adhu Secret-a Irukkalam
         try:
-            print("Try 2 Positional No AppID: (USER, PASS, TOTP, SECRET)")
-            sid = AliceBlue.login_and_get_sessionID(USER_ID, PASSWORD, totp, APP_SECRET)
-            print(f"Try2 SID: {str(sid)[:15]}")
+            print(f"Try2 SWAPPED: APP_ID={APP_SECRET} SECRET={APP_ID}")
+            sid = AliceBlue.login_and_get_sessionID(USER_ID, PASSWORD, totp, APP_SECRET, APP_ID)
+            print(f"Try2 SID: {str(sid)[:20]}")
             if sid and len(str(sid)) > 5:
                 alice = AliceBlue(username=USER_ID, session_id=sid)
-                state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY"
-                state["debug"] += " | SUCCESS Try2"
+                state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY - SWAPPED ID/SECRET WORKED - Render la Maathunga"
+                state["debug"] += " | SUCCESS Try2 SWAPPED - Render la APP_ID/SECRET Maathi Irukku"
                 return True
             else:
-                state["debug"] += f" | Try2 Empty SID: {sid}"
+                state["debug"] += f" | Try2 Empty: {sid}"
         except Exception as e:
             print(f"Try2 Failed: {e}")
             state["debug"] += f" | Try2 Failed: {e}"
 
-        # ---- TRY 3 - KWARGS with api_secret ----
+        # ---- TRY 3 - KWARGS CORRECT NAMES ----
         try:
-            print("Try 3 Kwargs api_secret")
-            sid = AliceBlue.login_and_get_sessionID(username=USER_ID, password=PASSWORD, twoFA=totp, api_secret=APP_SECRET, app_id=APP_ID)
+            print("Try3 Kwargs")
+            sid = AliceBlue.login_and_get_sessionID(username=USER_ID, password=PASSWORD, twoFA=totp, app_id=APP_ID, api_secret=APP_SECRET)
             if sid and len(str(sid)) > 5:
                 alice = AliceBlue(username=USER_ID, session_id=sid)
                 state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY"
-                state["debug"] += " | SUCCESS Try3"
+                state["debug"] += " | SUCCESS Try3 Kwargs"
                 return True
             else:
                 state["debug"] += f" | Try3 Empty: {sid}"
@@ -115,26 +112,21 @@ def alice_login():
             print(f"Try3 Failed: {e}")
             state["debug"] += f" | Try3 Failed: {e}"
 
-        # ---- TRY 4 - MANUAL HTTP - Library-a Nambi Irukka Vendaam ----
+        # ---- TRY 4 - KWARGS SWAPPED ----
         try:
-            print("Try 4 Manual HTTP - Direct Alice API")
-            # Step 1 - Encpkey
-            url1 = f"https://ant-web.aliceblueonline.com/rest/AliceBlueAPIService/api/customer/getAPIEncpkey?userId={USER_ID}"
-            r1 = requests.get(url1, timeout=10)
-            print(f"Encpkey Status: {r1.status_code} Body: {r1.text[:200]}")
-            state["debug"] += f" | Manual Encpkey Status:{r1.status_code} Body:{r1.text[:100]}"
-            if r1.status_code == 200:
-                try:
-                    encpkey = r1.json().get('encpkey') or r1.json().get('EncKey')
-                    print(f"Encpkey Got: {str(encpkey)[:10]}")
-                    state["debug"] += f" | Encpkey Got"
-                except Exception as e:
-                    state["debug"] += f" | Encpkey Parse Fail: {e}"
+            sid = AliceBlue.login_and_get_sessionID(username=USER_ID, password=PASSWORD, twoFA=totp, app_id=APP_SECRET, api_secret=APP_ID)
+            if sid and len(str(sid)) > 5:
+                alice = AliceBlue(username=USER_ID, session_id=sid)
+                state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY - SWAPPED"
+                state["debug"] += " | SUCCESS Try4 Swapped Kwargs"
+                return True
+            else:
+                state["debug"] += f" | Try4 Empty: {sid}"
         except Exception as e:
             print(f"Try4 Failed: {e}")
             state["debug"] += f" | Try4 Failed: {e}"
 
-        state["login"] = "LIVE ERROR - SessionID Empty - APP_ID/SECRET/PASS/TOTP Check pannunga"
+        state["login"] = "LIVE ERROR - All 4 Tried - APP_ID/SECRET/PASS/TOTP la Onnu Thappu - Alice ANT la Check pannunga"
         return False
     except Exception as e:
         state["login"] = f"LOGIN ERROR: {e}"
