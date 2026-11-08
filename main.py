@@ -1,4 +1,4 @@
-import os, time, pyotp, traceback
+import os, time, pyotp, traceback, inspect, requests
 from datetime import datetime, timedelta
 from flask import Flask, jsonify
 import threading
@@ -6,11 +6,11 @@ import yfinance as yf
 
 app = Flask(__name__)
 
-USER_ID = os.getenv("ALICE_USER_ID", "")
-PASSWORD = os.getenv("ALICE_PASSWORD", "")
-TOTP_SECRET = os.getenv("ALICE_TOTP_SECRET", "")
-APP_ID = os.getenv("ALICE_APP_ID", "")
-APP_SECRET = os.getenv("ALICE_APP_SECRET", "")
+USER_ID = os.getenv("ALICE_USER_ID", "").strip()
+PASSWORD = os.getenv("ALICE_PASSWORD", "").strip()
+TOTP_SECRET = os.getenv("ALICE_TOTP_SECRET", "").strip().replace(" ", "")
+APP_ID = os.getenv("ALICE_APP_ID", "").strip()
+APP_SECRET = os.getenv("ALICE_APP_SECRET", "").strip()
 MODE = os.getenv("MODE", "PAPER")
 try:
     LOTS = int(os.getenv("LOTS", "1"))
@@ -32,7 +32,7 @@ state = {
     "candle1": "",
     "candle2": "",
     "live_order": "",
-    "debug": "Waiting for login..."
+    "debug": "Waiting..."
 }
 
 def get_ist():
@@ -47,82 +47,98 @@ def alice_login():
             return True
 
         from alice_blue import AliceBlue
-        import inspect
 
-        # DEBUG - Site laye Kaamikkanum
-        methods = [m for m in dir(AliceBlue) if not m.startswith('_')]
+        # DEBUG - Signature-a Site laye Kaamikka
+        try:
+            sig = str(inspect.signature(AliceBlue.login_and_get_sessionID))
+        except Exception as e:
+            sig = f"No Sig: {e}"
         try:
             init_sig = str(inspect.signature(AliceBlue.__init__))
-        except Exception as e:
-            init_sig = f"Init Sign Error: {e}"
+        except:
+            init_sig = "No Init Sig"
 
-        state["debug"] = f"METHODS: {methods} | INIT: {init_sig}"
-        print(f"AliceBlue Methods: {methods}")
-        print(f"AliceBlue Init: {init_sig}")
+        state["debug"] = f"SESSIONID SIG: {sig} | INIT: {init_sig} | USER:{USER_ID[:3]}*** LEN USER:{len(USER_ID)} PASS:{len(PASSWORD)} TOTP_SECRET:{len(TOTP_SECRET)} APP_ID:{APP_ID} APP_SECRET_LEN:{len(APP_SECRET)}"
+        print(state["debug"])
 
-        if not TOTP_SECRET or not APP_SECRET:
-            state["login"] = "LIVE ERROR - APP_SECRET / TOTP Missing"
-            state["debug"] += " | ERROR: APP_SECRET/TOTP Missing"
+        if not USER_ID or not PASSWORD or not TOTP_SECRET or not APP_SECRET:
+            state["login"] = "LIVE ERROR - Oru Env Missing - USER/PASS/TOTP/SECRET Check pannunga"
             return False
 
         totp = pyotp.TOTP(TOTP_SECRET).now()
-        print(f"Trying LIVE Login User {USER_ID}")
+        print(f"TOTP Now: {totp} User: {USER_ID} AppID: {APP_ID}")
 
-        # Try A - Old Static
-        if hasattr(AliceBlue, 'login_and_get_access_token'):
-            try:
-                token = AliceBlue.login_and_get_access_token(username=USER_ID, password=PASSWORD, twoFA=totp, api_secret=APP_SECRET, app_id=APP_ID)
-                alice = AliceBlue(username=USER_ID, access_token=token)
-                state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY"
-                state["debug"] += " | SUCCESS Method A"
-                return True
-            except Exception as e:
-                print(f"Method A Failed: {e}")
-                state["debug"] += f" | A Failed: {e}"
-
-        # Try B - SessionID
-        if hasattr(AliceBlue, 'login_and_get_sessionID'):
-            try:
-                sid = AliceBlue.login_and_get_sessionID(username=USER_ID, password=PASSWORD, twoFA=totp, api_secret=APP_SECRET, app_id=APP_ID)
+        # ---- TRY 1 - POSITIONAL - Idhu thaan Correct - Kwarg Name Problem-a Thavirka ----
+        try:
+            print("Try 1 Positional: (USER, PASS, TOTP, SECRET, APP_ID)")
+            sid = AliceBlue.login_and_get_sessionID(USER_ID, PASSWORD, totp, APP_SECRET, APP_ID)
+            print(f"Try1 SID: {str(sid)[:15]}")
+            if sid and len(str(sid)) > 5:
                 alice = AliceBlue(username=USER_ID, session_id=sid)
                 state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY"
-                state["debug"] += " | SUCCESS Method B"
+                state["debug"] += " | SUCCESS Try1 Positional"
                 return True
-            except Exception as e:
-                print(f"Method B Failed: {e}")
-                state["debug"] += f" | B Failed: {e}"
+            else:
+                state["debug"] += f" | Try1 Empty SID: {sid}"
+        except Exception as e:
+            print(f"Try1 Failed: {e} {traceback.format_exc()}")
+            state["debug"] += f" | Try1 Failed: {e}"
 
-        # Try C - Direct Constructor - Pudhu Library
+        # ---- TRY 2 - POSITIONAL WITHOUT APP_ID ----
         try:
-            alice = AliceBlue(username=USER_ID, password=PASSWORD, api_secret=APP_SECRET, twoFA=totp)
-            if hasattr(alice, 'get_session_id'):
+            print("Try 2 Positional No AppID: (USER, PASS, TOTP, SECRET)")
+            sid = AliceBlue.login_and_get_sessionID(USER_ID, PASSWORD, totp, APP_SECRET)
+            print(f"Try2 SID: {str(sid)[:15]}")
+            if sid and len(str(sid)) > 5:
+                alice = AliceBlue(username=USER_ID, session_id=sid)
+                state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY"
+                state["debug"] += " | SUCCESS Try2"
+                return True
+            else:
+                state["debug"] += f" | Try2 Empty SID: {sid}"
+        except Exception as e:
+            print(f"Try2 Failed: {e}")
+            state["debug"] += f" | Try2 Failed: {e}"
+
+        # ---- TRY 3 - KWARGS with api_secret ----
+        try:
+            print("Try 3 Kwargs api_secret")
+            sid = AliceBlue.login_and_get_sessionID(username=USER_ID, password=PASSWORD, twoFA=totp, api_secret=APP_SECRET, app_id=APP_ID)
+            if sid and len(str(sid)) > 5:
+                alice = AliceBlue(username=USER_ID, session_id=sid)
+                state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY"
+                state["debug"] += " | SUCCESS Try3"
+                return True
+            else:
+                state["debug"] += f" | Try3 Empty: {sid}"
+        except Exception as e:
+            print(f"Try3 Failed: {e}")
+            state["debug"] += f" | Try3 Failed: {e}"
+
+        # ---- TRY 4 - MANUAL HTTP - Library-a Nambi Irukka Vendaam ----
+        try:
+            print("Try 4 Manual HTTP - Direct Alice API")
+            # Step 1 - Encpkey
+            url1 = f"https://ant-web.aliceblueonline.com/rest/AliceBlueAPIService/api/customer/getAPIEncpkey?userId={USER_ID}"
+            r1 = requests.get(url1, timeout=10)
+            print(f"Encpkey Status: {r1.status_code} Body: {r1.text[:200]}")
+            state["debug"] += f" | Manual Encpkey Status:{r1.status_code} Body:{r1.text[:100]}"
+            if r1.status_code == 200:
                 try:
-                    sid = alice.get_session_id()
-                    print(f"Session ID Got: {str(sid)[:10]}")
+                    encpkey = r1.json().get('encpkey') or r1.json().get('EncKey')
+                    print(f"Encpkey Got: {str(encpkey)[:10]}")
+                    state["debug"] += f" | Encpkey Got"
                 except Exception as e:
-                    print(f"get_session_id Failed: {e}")
-            state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY"
-            state["debug"] += " | SUCCESS Method C Direct"
-            return True
+                    state["debug"] += f" | Encpkey Parse Fail: {e}"
         except Exception as e:
-            print(f"Method C Failed: {e}")
-            state["debug"] += f" | C Failed: {e}"
+            print(f"Try4 Failed: {e}")
+            state["debug"] += f" | Try4 Failed: {e}"
 
-        # Try D - Direct + app_id
-        try:
-            alice = AliceBlue(username=USER_ID, password=PASSWORD, api_secret=APP_SECRET, twoFA=totp, app_id=APP_ID)
-            state["login"] = f"LIVE READY - User {USER_ID[:3]}*** - REAL MONEY"
-            state["debug"] += " | SUCCESS Method D"
-            return True
-        except Exception as e:
-            print(f"Method D Failed: {e}")
-            state["debug"] += f" | D Failed: {e}"
-
-        state["login"] = "LIVE ERROR - No Login Method Worked - Check Debug Below"
+        state["login"] = "LIVE ERROR - SessionID Empty - APP_ID/SECRET/PASS/TOTP Check pannunga"
         return False
     except Exception as e:
         state["login"] = f"LOGIN ERROR: {e}"
-        state["debug"] = f"EXCEPTION: {e} | {traceback.format_exc()[:1000]}"
+        state["debug"] = f"EXCEPTION: {e} | {traceback.format_exc()[:1500]}"
         print(traceback.format_exc())
         return False
 
@@ -259,7 +275,7 @@ def home():
     <p>Reason: {state['reason']}</p>
     <p>Live Order: {state['live_order']}</p>
     <hr>
-    <h3>DEBUG - Idha Screenshot Anuppunga:</h3>
+    <h3>DEBUG:</h3>
     <p>{state['debug']}</p>
     <p><a href='/status'>STATUS JSON</a></p>
     <script>setTimeout(()=>location.reload(),10000)</script>
