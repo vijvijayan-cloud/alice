@@ -42,7 +42,7 @@ state = {
     "debug": "Waiting...",
     "session_id": "",
     "real_session": "",
-    "api_version": "V2_AUTHCODE_TEST",
+    "api_version": "V2_FIX_NULL_KEY",
     "login_url": "",
     "auth_code": ""
 }
@@ -56,35 +56,41 @@ enc_key_global = ""
 base_url_global = "https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/"
 auth_code_global = AUTH_CODE
 
+def is_valid_key(k):
+    if not k:
+        return False
+    k = str(k).strip()
+    if k.lower() in ["null", "none", ""]:
+        return False
+    return True
+
 def try_encpkey():
-    # Rendu Base-yum Try pannu - Hang Aaga Koodadhu - Timeout 10 Sec
     global base_url_global, enc_key_global
-    bases = [
-        "https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/",
-        "https://a3.aliceblueonline.com/rest/AliceBlueAPIService/api/",
-    ]
-    for base in bases:
-        try:
-            print(f"TRY Encpkey {base} USER:{USER_ID}", flush=True)
-            r = requests.post(base + "customer/getAPIEncpkey", json={"userId": USER_ID}, timeout=10, headers={"Content-Type": "application/json"})
-            print(f"Encpkey RESULT {base} St:{r.status_code} Body:{r.text[:500]}", flush=True)
-            state["debug"] += f" | Encpkey {base[:15]} St:{r.status_code} Body:{r.text[:200]}"
-            if r.status_code == 200 and r.text.strip():
-                try:
-                    j = r.json()
-                except:
-                    continue
-                enc = j.get("encKey") or j.get("encpkey") or j.get("enc_key") or ""
-                if enc:
-                    enc_key_global = enc
-                    base_url_global = base
-                    return enc, base, r.text[:300]
-            # 200 Aana Key Illana - Adutha Base Try pannu
-        except Exception as e:
-            print(f"Encpkey ERROR {base} : {e}", flush=True)
-            state["debug"] += f" | Encpkey Err {base[:15]} : {e}"
-            continue
-    return "", "", "All Base Fail"
+    # ant mattum thaan correct - a3 405 tharum - adhanala ant mattum
+    base = "https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/"
+    try:
+        print(f"TRY Encpkey {base} USER:{USER_ID}", flush=True)
+        r = requests.post(base + "customer/getAPIEncpkey", json={"userId": USER_ID}, timeout=10, headers={"Content-Type": "application/json"})
+        print(f"Encpkey RESULT St:{r.status_code} Body:{r.text[:600]}", flush=True)
+        state["debug"] += f" | Encpkey St:{r.status_code} Body:{r.text[:300]}"
+        if r.status_code == 200 and r.text.strip():
+            try:
+                j = r.json()
+            except:
+                return "", "", "JSON Fail"
+            enc = j.get("encKey") or j.get("encpkey") or ""
+            emsg = j.get("emsg") or ""
+            # Alice "null" string tharudha nu check - Idhu thaan Mukkiyam
+            if not is_valid_key(enc):
+                state["debug"] += f" | Encpkey NULL - Alice Solludhu: {emsg} - Web la Login Pannanum"
+                return "", base, emsg
+            enc_key_global = enc
+            base_url_global = base
+            return enc, base, r.text[:300]
+    except Exception as e:
+        print(f"Encpkey ERROR : {e}", flush=True)
+        state["debug"] += f" | Encpkey Err : {e}"
+    return "", base, "Fail"
 
 def alice_login_v2():
     global session_id_global, real_session_global, enc_key_global, base_url_global
@@ -95,25 +101,26 @@ def alice_login_v2():
             totp = ""
         login_url = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
         state["login_url"] = login_url
-        state["debug"] = f"V2 AUTHCODE - USER:{USER_ID} APP_ID:{APP_ID} SECRET_LEN:{len(APP_SECRET)} TOTP:{totp} DOB:{DOB_YEAR} AUTHCODE_LEN:{len(auth_code_global)}"
+        state["debug"] = f"V2 - USER:{USER_ID} APP_ID:{APP_ID} AUTHCODE_LEN:{len(auth_code_global)}"
         print(state["debug"], flush=True)
 
-        # STEP 1 - Encpkey
-        enc_key, base, raw = try_encpkey()
+        # STEP 1 - Encpkey - Login pannala na NULL varum
+        enc_key, base, msg = try_encpkey()
         if not enc_key:
-            state["login"] = "Encpkey Empty - Rendu URL-layum Key Varla - /test Paaru"
-            print("Encpkey Empty - All Fail", flush=True)
+            state["login"] = "NEED WEB LOGIN FIRST - /login la Login pannunga - Apparam Encpkey Varum"
+            state["debug"] += f" | Encpkey NULL kaaranam: {msg}"
+            print("Encpkey NULL - Need Web Login", flush=True)
             return False
 
         # STEP 2 - authCode Check
         if not auth_code_global:
-            state["login"] = "NEED LOGIN - /login Open pannunga"
+            state["login"] = "NEED LOGIN - /login Open pannunga - authCode Edukkavum"
             state["debug"] += f" | authCode Illa. Login: {login_url}"
             return False
 
-        # STEP 3 - getSessionID with REAL authCode
+        # STEP 3 - getSessionID
         payload = {"userId": USER_ID, "sessionId": auth_code_global}
-        print(f"TRY getSessionID {base} Payload:{payload}", flush=True)
+        print(f"TRY getSessionID Payload:{payload}", flush=True)
         r2 = requests.post(base + "customer/getSessionID", json=payload, timeout=10, headers={"Content-Type": "application/json"})
         print(f"getSessionID St:{r2.status_code} Body:{r2.text[:600]}", flush=True)
         state["debug"] += f" | getSessionID St:{r2.status_code} Body:{r2.text[:200]}"
@@ -124,7 +131,7 @@ def alice_login_v2():
                 j2 = {}
             real = j2.get("sessionId") or j2.get("sessionID") or j2.get("token") or j2.get("accessToken") or j2.get("userSession") or ""
             stat = str(j2.get("stat") or j2.get("status") or "").upper()
-            if real and len(str(real)) > 10:
+            if is_valid_key(real) and len(str(real)) > 10:
                 session_id_global = auth_code_global
                 real_session_global = str(real)
                 state["session_id"] = auth_code_global[:12] + "***"
@@ -181,27 +188,8 @@ def place_order_direct_v2(strike, side, qty):
         exp_str = exp.strftime("%d-%b-%Y").upper()
         url = base_url_global + "placeOrder/placeOrder"
         sess = real_session_global if real_session_global else session_id_global
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {USER_ID} {sess}",
-            "userId": USER_ID,
-            "sessionId": sess,
-        }
-        payload = {
-            "userId": USER_ID,
-            "sessionId": sess,
-            "tradingSymbol": f"NIFTY {strike} {side}",
-            "exchange": "NFO",
-            "transactionType": "BUY",
-            "orderType": "MARKET",
-            "productType": "MIS",
-            "quantity": qty,
-            "price": "0",
-            "triggerPrice": "0",
-            "expiry": exp_str,
-            "strike": str(strike),
-            "optionType": side,
-        }
+        headers = {"Content-Type": "application/json","Authorization": f"Bearer {USER_ID} {sess}","userId": USER_ID,"sessionId": sess}
+        payload = {"userId": USER_ID,"sessionId": sess,"tradingSymbol": f"NIFTY {strike} {side}","exchange": "NFO","transactionType": "BUY","orderType": "MARKET","productType": "MIS","quantity": qty,"price": "0","triggerPrice": "0","expiry": exp_str,"strike": str(strike),"optionType": side}
         print(f"V2 Order URL:{url} Payload:{payload}", flush=True)
         r = requests.post(url, json=payload, headers=headers, timeout=20)
         print(f"V2 Order Status:{r.status_code} Body:{r.text[:600]}", flush=True)
@@ -305,7 +293,7 @@ except Exception as e:
 def home():
     login_url = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
     return f"""
-    <h1>ALICE BOT - NIFTY 2ND CANDLE FLIP - {state['mode']} - V2 AUTHCODE</h1>
+    <h1>ALICE BOT - NIFTY 2ND CANDLE FLIP - {state['mode']} - V2 FIX</h1>
     <p>Time: {state['last_update']}</p>
     <p>Login: {state['login']} | Mode: <b>{state['mode']}</b></p>
     <p>Signal: {state['signal']}</p>
@@ -316,17 +304,13 @@ def home():
     <p>Live Order: {state['live_order']}</p>
     <p>Session: {state['session_id']} | Real: {state['real_session']}</p>
     <hr>
-    <h3>TEST LINKS:</h3>
-    <p><a href='/test'><b>1. /test - Encpkey Test Pannu</b></a> - Alice Reply Varudha nu Paakanum</p>
-    <p><a href='/login'><b>2. /login - Alice Login</b></a></p>
-    <p><a href='/status'>STATUS JSON</a></p>
+    <h3>STEP 1 - WEB LOGIN MUDHALIL SEYAVUM:</h3>
+    <p><a href='/login' target='_blank'><b>CLICK HERE - /login - Alice Web la Login pannunga</b></a></p>
+    <p>User: TN15K7 + Password + TOTP (496287 maadhiri - App la Paaru) + DOB Year 1987</p>
+    <p>Login Mudinja Apparam - Home Page la Encpkey Varum - Apparam authCode Edukkalam</p>
+    <p>Direct: <a href='{login_url}' target='_blank'>{login_url}</a></p>
     <hr>
-    <h3>LOGIN STEPS:</h3>
-    <p>1. <a href='/login' target='_blank'><b>CLICK HERE TO LOGIN - /login</b></a></p>
-    <p>2. Alice la Login pannunga - User TN15K7 + Password + TOTP</p>
-    <p>3. Login panna apparam - URL la authCode=XXXX varum - Adha Copy pannunga</p>
-    <p>4. Render -> Environment -> ALICE_AUTH_CODE la Adha Paste pannunga -> Save -> Restart</p>
-    <p>Direct Login Link: <a href='{login_url}' target='_blank'>{login_url}</a></p>
+    <p><a href='/test'><b>/test - Encpkey Test</b></a> | <a href='/status'>STATUS JSON</a></p>
     <hr>
     <h3>DEBUG:</h3>
     <p>{state['debug']}</p>
@@ -354,14 +338,20 @@ def callback():
 def test_encpkey():
     out = []
     out.append(f"<p>USER_ID: {USER_ID} | APP_ID: {APP_ID} | MODE: {MODE}</p>")
-    for base in ["https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/", "https://a3.aliceblueonline.com/rest/AliceBlueAPIService/api/"]:
-        try:
-            out.append(f"<p><b>Trying {base}</b> ...</p>")
-            r = requests.post(base + "customer/getAPIEncpkey", json={"userId": USER_ID}, timeout=10, headers={"Content-Type": "application/json"})
-            out.append(f"<p>Status: {r.status_code}<br>Body: {r.text[:800]}</p><hr>")
-        except Exception as e:
-            out.append(f"<p style='color:red'><b>ERROR {base} : {e}</b></p><hr>")
-    return "<h2>Encpkey Test - Alice Reply Varudha?</h2>" + "".join(out) + "<br><a href='/'>Home</a> | <a href='/test'>Test Again</a>"
+    base = "https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/"
+    try:
+        out.append(f"<p><b>Trying {base}</b></p>")
+        r = requests.post(base + "customer/getAPIEncpkey", json={"userId": USER_ID}, timeout=10, headers={"Content-Type": "application/json"})
+        out.append(f"<p>Status: {r.status_code}<br>Body: {r.text[:800]}</p><hr>")
+        j = r.json()
+        enc = j.get("encKey")
+        if not is_valid_key(enc):
+            out.append(f"<p style='color:red'><b>Encpkey NULL - Kaaranam: {j.get('emsg')} - Web la Login Pannanum!</b></p>")
+        else:
+            out.append(f"<p style='color:green'><b>Encpkey OK: {str(enc)[:20]}***</b></p>")
+    except Exception as e:
+        out.append(f"<p style='color:red'><b>ERROR: {e}</b></p>")
+    return "<h2>Encpkey Test</h2>" + "".join(out) + "<br><a href='/'>Home</a> | <a href='/test'>Test Again</a> | <a href='/login'>Login</a>"
 
 @app.route('/status')
 def status():
