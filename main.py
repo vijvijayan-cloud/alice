@@ -1,4 +1,4 @@
-import os, time, pyotp, traceback, inspect, hashlib, json
+import os, time, pyotp, traceback, hashlib, json
 from datetime import datetime, timedelta
 from flask import Flask, jsonify
 import threading
@@ -48,123 +48,72 @@ def get_ist():
 
 alice = None
 session_id_global = ""
+enc_key_global = ""
+base_url_global = "https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/"
 
-# ---------- V2 MANUAL LOGIN - Library Illama Direct API ----------
 def alice_login_v2():
-    global session_id_global
+    global session_id_global, enc_key_global, base_url_global, alice
     try:
-        # V2 ku TOTP thaan Venum - DOB Illa
         try:
             totp = pyotp.TOTP(TOTP_SECRET).now() if TOTP_SECRET else ""
         except:
             totp = ""
         state["debug"] = f"V2 TRY - USER:{USER_ID} APP_ID:{APP_ID} LEN:{len(APP_ID)} SECRET:{APP_SECRET[:3]}*** LEN:{len(APP_SECRET)} TOTP:{totp} DOB:{DOB_YEAR}"
         print(state["debug"])
-
-        # Base URLs - Ella URL-um Try pannanum - Onnu Work Aagum
         base_urls = [
-            "https://a3.aliceblueonline.com/rest/AliceBlueAPIService/api/",
             "https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/",
-            "https://ant-web.aliceblueonline.com/rest/AliceBlueAPIService/api/",
+            "https://a3.aliceblueonline.com/rest/AliceBlueAPIService/api/",
         ]
-
         for base in base_urls:
             try:
-                # Step 1 - getAPIEncpkey
                 url = base + "customer/getAPIEncpkey"
-                print(f"V2 Trying Encpkey: {url} User:{USER_ID}")
                 r = requests.post(url, json={"userId": USER_ID}, timeout=15, headers={"Content-Type": "application/json"})
-                print(f"Encpkey Status: {r.status_code} Body: {r.text[:300]}")
-                state["debug"] += f" | {base[:30]} Encpkey Status:{r.status_code} Body:{r.text[:150]}"
+                print(f"Encpkey {base} Status:{r.status_code} Body:{r.text[:300]}")
+                state["debug"] += f" | {base[:25]} Status:{r.status_code}"
                 if r.status_code != 200 or not r.text.strip():
                     continue
                 try:
                     j = r.json()
                 except:
                     continue
-                enc_key = j.get("encKey") or j.get("encpkey") or j.get("EncKey") or ""
+                enc_key = j.get("encKey") or j.get("encpkey") or ""
                 if not enc_key:
-                    state["debug"] += f" | No EncKey in {j}"
                     continue
-                print(f"EncKey Got: {enc_key[:10]}***")
-                state["debug"] += f" | EncKey Got"
-
-                # Step 2 - SHA256 Session ID - 3 Order Try pannanum
-                combos = [
-                    USER_ID + APP_ID + enc_key,
-                    USER_ID + enc_key + APP_ID,
-                    APP_ID + USER_ID + enc_key,
-                    USER_ID + APP_SECRET + enc_key,
-                ]
-                for idx, combo in enumerate(combos):
-                    sid = hashlib.sha256(combo.encode()).hexdigest()
-                    print(f"Combo {idx} SID: {sid[:15]}")
-                    # Step 3 - getSessionID / Validate - Session-a Test panna Balance Check
-                    for ep in ["customer/getSessionID", "customer/getAPIEncpkey"]:
-                        try:
-                            # V2 getSessionID payload
-                            payload = {"userId": USER_ID, "sessionId": sid}
-                            r2 = requests.post(base + "customer/getSessionID", json=payload, timeout=15, headers={"Content-Type": "application/json"})
-                            print(f"getSessionID Try: {r2.status_code} {r2.text[:200]}")
-                        except Exception as e:
-                            print(f"getSessionID Error: {e}")
-                    # Session-a Save panni Return - Balance Check la Confirm pannuvom
-                    session_id_global = sid
-                    state["session_id"] = sid[:15] + "***"
-                    state["login"] = f"LIVE READY V2 - User {USER_ID[:3]}*** - REAL MONEY - Base:{base[:20]} Combo:{idx} - EncKey OK"
-                    state["debug"] += f" | SUCCESS V2 Combo {idx} SID:{sid[:10]}"
-                    return True
+                enc_key_global = enc_key
+                base_url_global = base
+                # SHA256 - Combo 0 thaan Work Aachu Ungalukku - USER + APP_ID + ENC
+                combo = USER_ID + APP_ID + enc_key
+                sid = hashlib.sha256(combo.encode()).hexdigest()
+                session_id_global = sid
+                state["session_id"] = sid[:15] + "***"
+                # V2 Session-a AliceBlue Library ku Kuduthu Order Podavum Mudiyum
+                try:
+                    from alice_blue import AliceBlue
+                    alice = AliceBlue(username=USER_ID, session_id=sid)
+                    print(f"AliceBlue Object Created with V2 Session")
+                    state["debug"] += f" | AliceBlue Obj OK"
+                except Exception as e:
+                    print(f"AliceBlue Obj Failed: {e}")
+                    state["debug"] += f" | AliceBlue Obj Failed: {e}"
+                state["login"] = f"LIVE READY V2 - User {USER_ID[:3]}*** - REAL MONEY - EncKey OK"
+                state["debug"] += f" | SUCCESS V2 SID:{sid[:10]}"
+                return True
             except Exception as e:
-                print(f"V2 Base {base} Failed: {e} {traceback.format_exc()}")
+                print(f"V2 Base Failed: {e}")
                 state["debug"] += f" | Base Failed: {e}"
                 continue
-        state["login"] = "LIVE ERROR V2 - Encpkey Kedaikala - ANT la API Key Enable pannala"
+        state["login"] = "LIVE ERROR V2 - Encpkey Kedaikala"
         return False
     except Exception as e:
         state["debug"] += f" | V2 Exception: {e}"
         print(traceback.format_exc())
         return False
 
-# ---------- OLD V1 LOGIN - Backup ----------
-def alice_login_v1():
-    global alice
-    try:
-        from alice_blue import AliceBlue
-        try:
-            totp = pyotp.TOTP(TOTP_SECRET).now() if TOTP_SECRET else ""
-        except:
-            totp = ""
-        twofa_list = []
-        if DOB_YEAR:
-            twofa_list.append(("DOB", DOB_YEAR))
-        if totp:
-            twofa_list.append(("TOTP", totp))
-        for label, twofa in twofa_list:
-            try:
-                sid = AliceBlue.login_and_get_sessionID(USER_ID, PASSWORD, twofa, APP_ID, APP_SECRET)
-                if sid and len(str(sid)) > 5:
-                    alice = AliceBlue(username=USER_ID, session_id=sid)
-                    state["login"] = f"LIVE READY V1 - {label}"
-                    return True
-            except Exception as e:
-                state["debug"] += f" | V1 {label} Failed: {e}"
-        return False
-    except Exception as e:
-        state["debug"] += f" | V1 Exception: {e}"
-        return False
-
 def alice_login():
     if MODE == "PAPER":
         state["login"] = f"PAPER READY - User {USER_ID[:3]}***"
         return True
-    # Mudhala V2 Try - Pudhu Key ku Idhu thaan Correct
-    if alice_login_v2():
-        return True
-    # Illana V1 Try
-    if alice_login_v1():
-        return True
-    state["login"] = "LIVE ERROR - V1+V2 Rendum Fail - ANT la Apps -> API Key Enable pannunga / api@aliceblueindia.com ku Mail pannunga"
-    return False
+    return alice_login_v2()
 
 def get_candles():
     try:
@@ -184,6 +133,57 @@ def safe_float(x):
     except:
         return float(x)
 
+def get_expiry_date():
+    # Nearest Thursday - NIFTY Weekly Expiry
+    ist = get_ist()
+    d = ist.date()
+    # Thursday = 3 (Monday=0)
+    days_ahead = (3 - d.weekday()) % 7
+    if days_ahead == 0 and ist.hour >= 15:
+        days_ahead = 7
+    exp = d + timedelta(days=days_ahead)
+    return exp
+
+def place_order_v2_direct(strike, side, qty):
+    # Direct V2 Place Order - Library Fail Aana Idhu Work Aagum
+    try:
+        # Expiry Format: DD-MMM-YYYY Eg: 13-NOV-2026
+        exp = get_expiry_date()
+        exp_str = exp.strftime("%d-%b-%Y").upper()
+        # Symbol Format V2: NIFTY + Expiry + Strike + CE/PE
+        # Eg: NIFTY13NOV2626000CE - Alice ku Vera Format Thevai na Library-a Use pannuvom
+        url = base_url_global + "placeOrder/placeOrder"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {USER_ID} {session_id_global}",
+            "auth": f"Bearer {USER_ID} {session_id_global}",
+            "userId": USER_ID,
+            "sessionId": session_id_global,
+        }
+        # Alice V2 PlaceOrder Payload - Standard
+        payload = {
+            "userId": USER_ID,
+            "sessionId": session_id_global,
+            "tradingSymbol": f"NIFTY {strike} {side}",
+            "exchange": "NFO",
+            "transactionType": "BUY",
+            "orderType": "MARKET",
+            "productType": "MIS",
+            "quantity": qty,
+            "price": "0",
+            "triggerPrice": "0",
+            "expiry": exp_str,
+            "strike": str(strike),
+            "optionType": side,
+        }
+        print(f"V2 Direct Order URL:{url} Payload:{payload}")
+        r = requests.post(url, json=payload, headers=headers, timeout=20)
+        print(f"V2 Direct Order Status:{r.status_code} Body:{r.text[:500]}")
+        return r.status_code, r.text[:500]
+    except Exception as e:
+        print(f"V2 Direct Order Failed: {e}")
+        return 0, str(e)
+
 def place_trade(side, price, nifty_price):
     state["in_trade"] = True
     state["side"] = side
@@ -195,46 +195,53 @@ def place_trade(side, price, nifty_price):
         return
     if MODE == "LIVE":
         try:
-            # V2 Order - Direct API
-            if session_id_global:
-                try:
-                    strike = round(float(nifty_price) / 50) * 50
-                    # V2 Place Order - a3 Base
-                    base = "https://a3.aliceblueonline.com/rest/AliceBlueAPIService/api/"
-                    # Symbol: NIFTY 26000 CE - Expiry - Nearest Thursday - Simple-a Current Week
-                    # Alice V2 ku instrument token thevai - Adha edukka try panna, fail aana V1 library-a use panna
-                    state["reason"] = f"LIVE V2 SESSION READY - NIFTY {strike} {side} x {LOTS} - Session OK, Order ku Instrument Token Thevai - V1 Library-ku Maathuren"
-                    state["live_order"] = f"V2 SESSION OK - {session_id_global[:10]}"
-                    # V1 Library irundha Adha Vaichu Order Podu
-                    if alice is not None:
-                        instrument = None
-                        try:
-                            instrument = alice.get_instrument_by_symbol('NFO', f"NIFTY {strike} {side}")
-                        except Exception as e:
-                            print(f"Inst Fail: {e}")
-                        if instrument is not None:
-                            qty = 75 * LOTS
-                            order = alice.place_order(transaction_type='BUY', instrument=instrument, quantity=qty, order_type='MARKET', product_type='MIS', price=0.0, trigger_price=None, stop_loss=None, square_off=None, trailing_sl=None, is_amo=False)
-                            state["reason"] = f"LIVE ORDER PLACED - NIFTY {strike} {side} x {LOTS} Lot"
-                            state["live_order"] = f"PLACED - {order}"
-                            return
-                    # V1 Illana - Session mattum Ready nu Kaamikka
+            if not session_id_global and alice is None:
+                state["reason"] = "LIVE FAILED - Alice Not Logged In - Re-Login Try pannuren"
+                alice_login()
+                if not session_id_global and alice is None:
+                    state["live_order"] = "FAILED - Not Logged In"
+                    state["in_trade"] = False
                     return
-                except Exception as e:
-                    state["reason"] = f"LIVE V2 ORDER FAILED: {e}"
-                    print(traceback.format_exc())
-                    return
-            if alice is None:
-                state["reason"] = "LIVE FAILED - Alice Not Logged In"
-                state["live_order"] = "FAILED - Not Logged In"
-                state["in_trade"] = False
-                return
             strike = round(float(nifty_price) / 50) * 50
-            instrument = alice.get_instrument_by_symbol('NFO', f"NIFTY {strike} {side}")
             qty = 75 * LOTS
-            order = alice.place_order(transaction_type='BUY', instrument=instrument, quantity=qty, order_type='MARKET', product_type='MIS', price=0.0, trigger_price=None, stop_loss=None, square_off=None, trailing_sl=None, is_amo=False)
-            state["reason"] = f"LIVE ORDER PLACED - NIFTY {strike} {side} x {LOTS} Lot"
-            state["live_order"] = f"PLACED - {order}"
+            # TRY 1 - Library Vaichu Order - V2 Session Kuduthirukkom
+            if alice is not None:
+                try:
+                    instrument = None
+                    try:
+                        instrument = alice.get_instrument_by_symbol('NFO', f"NIFTY {strike} {side}")
+                    except Exception as e:
+                        print(f"Inst1 Failed: {e}")
+                        try:
+                            instrument = alice.get_instrument_for_fno(symbol='NIFTY', expiry_date=get_expiry_date(), is_fut=False, strike=strike, is_CE=(side == "CE"))
+                        except Exception as e2:
+                            print(f"Inst2 Failed: {e2}")
+                    if instrument is not None:
+                        order = alice.place_order(transaction_type='BUY', instrument=instrument, quantity=qty, order_type='MARKET', product_type='MIS', price=0.0, trigger_price=None, stop_loss=None, square_off=None, trailing_sl=None, is_amo=False)
+                        state["reason"] = f"LIVE ORDER PLACED - NIFTY {strike} {side} x {LOTS} Lot"
+                        state["live_order"] = f"PLACED VIA LIBRARY - {order}"
+                        print(f"Library Order Success: {order}")
+                        return
+                    else:
+                        state["debug"] += f" | Instrument Not Found {strike} {side}"
+                except Exception as e:
+                    print(f"Library Order Failed: {e} {traceback.format_exc()}")
+                    state["debug"] += f" | Library Order Failed: {e}"
+            # TRY 2 - Direct V2 API Order
+            code, body = place_order_v2_direct(strike, side, qty)
+            state["reason"] = f"LIVE ORDER TRY V2 DIRECT - NIFTY {strike} {side} x {LOTS} - Status:{code}"
+            state["live_order"] = f"V2 DIRECT - Status:{code} Body:{body}"
+            # TRY 3 - Session Refresh panni Thirumba Library Try
+            if code != 200:
+                alice_login()
+                if alice is not None:
+                    try:
+                        instrument = alice.get_instrument_by_symbol('NFO', f"NIFTY {strike} {side}")
+                        order = alice.place_order(transaction_type='BUY', instrument=instrument, quantity=qty, order_type='MARKET', product_type='MIS', price=0.0, trigger_price=None, stop_loss=None, square_off=None, trailing_sl=None, is_amo=False)
+                        state["reason"] = f"LIVE ORDER PLACED RETRY - NIFTY {strike} {side}"
+                        state["live_order"] = f"PLACED RETRY - {order}"
+                    except Exception as e:
+                        state["reason"] = f"LIVE ORDER FAILED RETRY: {e}"
         except Exception as e:
             state["reason"] = f"LIVE ORDER FAILED: {e}"
             state["live_order"] = f"FAILED: {e}"
@@ -320,12 +327,23 @@ def home():
     <hr>
     <h3>DEBUG:</h3>
     <p>{state['debug']}</p>
-    <p><a href='/status'>STATUS JSON</a></p>
+    <p><a href='/status'>STATUS JSON</a> | <a href='/test-order'>TEST ORDER (PAPER CHECK)</a></p>
     <script>setTimeout(()=>location.reload(),10000)</script>
     """
 @app.route('/status')
 def status():
     return jsonify(state)
+@app.route('/test-order')
+def test_order():
+    # Order Logic Test panna - Real Order Podadhu - Logic mattum Check pannum
+    try:
+        if alice is not None:
+            inst = alice.get_instrument_by_symbol('NFO', 'NIFTY 26000 CE')
+            return jsonify({"alice_obj": "OK", "instrument_test": str(inst)[:200], "session": state['session_id'], "login": state['login']})
+        else:
+            return jsonify({"alice_obj": "NONE", "session": state['session_id'], "login": state['login'], "debug": state['debug']})
+    except Exception as e:
+        return jsonify({"error": str(e), "session": state['session_id'], "debug": state['debug']})
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))
