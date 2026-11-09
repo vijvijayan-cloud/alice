@@ -24,6 +24,9 @@ try:
 except:
     LOTS = 1
 
+# NIFTY LOT SIZE - 2026 la 65 - Munnadi 75 Irundhuchu
+LOT_SIZE = 65
+
 state = {
     "strategy": "NIFTY_2ND_CANDLE_FLIP",
     "mode": MODE,
@@ -42,9 +45,11 @@ state = {
     "debug": "Waiting...",
     "session_id": "",
     "real_session": "",
-    "api_version": "V3_AUTHCODE_IS_SESSION",
+    "api_version": "V5_LOT65_REAL_TEST",
     "login_url": "",
-    "auth_code": ""
+    "auth_code": "",
+    "test_order_result": "",
+    "lot_size": LOT_SIZE
 }
 
 def get_ist():
@@ -69,7 +74,6 @@ def try_encpkey():
     global base_url_global, enc_key_global
     base = "https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/"
     try:
-        print(f"TRY Encpkey USER:{USER_ID}", flush=True)
         r = requests.post(base + "customer/getAPIEncpkey", json={"userId": USER_ID}, timeout=10, headers={"Content-Type": "application/json"})
         print(f"Encpkey St:{r.status_code} Body:{r.text[:600]}", flush=True)
         state["debug"] = f"Encpkey St:{r.status_code} Body:{r.text[:250]}"
@@ -81,12 +85,11 @@ def try_encpkey():
             enc = j.get("encKey") or ""
             emsg = j.get("emsg") or ""
             if not is_valid_key(enc):
-                return "", base, emsg or "Encpkey NULL - Web Login Thevai"
+                return "", base, emsg or "Encpkey NULL"
             enc_key_global = enc
             base_url_global = base
             return enc, base, "OK"
     except Exception as e:
-        print(f"Encpkey ERROR : {e}", flush=True)
         state["debug"] = f"Encpkey Err : {e}"
     return "", base, "Fail"
 
@@ -96,22 +99,13 @@ def alice_login_v2():
     try:
         login_url = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
         state["login_url"] = login_url
-        print(f"LOGIN TRY - USER:{USER_ID} AUTHCODE_LEN:{len(auth_code_global)}", flush=True)
-
-        # STEP 1 - Encpkey - Real Key Varavendum
         enc_key, base, msg = try_encpkey()
         if not enc_key:
-            state["login"] = f"NEED WEB LOGIN - {msg} - /login la Login pannunga"
+            state["login"] = f"NEED WEB LOGIN - {msg}"
             return False
-
-        # STEP 2 - authCode Check
         if not auth_code_global or not is_valid_key(auth_code_global):
-            state["login"] = "NEED AUTHCODE - /setcode la authCode Paste pannunga"
+            state["login"] = "NEED AUTHCODE - /setcode la Paste pannunga"
             return False
-
-        # STEP 3 - FIX: getSessionID 404 Varudhu - Alice Adha Remove panniduchu
-        # Adhanala authCode-ve Session-a Edukkrom - Idhu thaan Pudhu Alice Flow
-        # getSessionID Try pannu - Vandha Nalla - Varalana authCode-ve Use pannu
         real = ""
         try:
             payload = {"userId": USER_ID, "sessionId": auth_code_global}
@@ -125,24 +119,18 @@ def alice_login_v2():
                 except:
                     real = ""
         except Exception as e:
-            print(f"getSessionID Skip - {e}", flush=True)
             state["debug"] += f" | getSessionID Skip - Use authCode as Session"
-
-        # STEP 4 - authCode-ve Session - 404 Vandhaalum Login OK
         session_id_global = auth_code_global
-        # getSessionID la Real Session Vandha Adha Edu - Illana authCode-ve Session
         if is_valid_key(real) and len(str(real)) > 10:
             real_session_global = str(real)
         else:
             real_session_global = auth_code_global
-
         state["session_id"] = auth_code_global[:12] + "***"
         state["real_session"] = str(real_session_global)[:12] + "***"
-        state["login"] = f"LIVE READY V3 - User {USER_ID[:3]}*** - AUTHCODE IS SESSION - Encpkey OK"
-        print(f"LOGIN SUCCESS - Encpkey OK - authCode as Session", flush=True)
+        state["login"] = f"LIVE READY V5 - User {USER_ID[:3]}*** - LOT 65 - AUTHCODE IS SESSION"
         return True
     except Exception as e:
-        state["debug"] += f" | V3 Exception: {e}"
+        state["debug"] += f" | V5 Exception: {e}"
         print(traceback.format_exc(), flush=True)
         return False
 
@@ -178,20 +166,42 @@ def get_expiry_date():
         days_ahead = 7
     return d + timedelta(days=days_ahead)
 
-def place_order_direct_v2(strike, side, qty):
+def get_nifty_price():
     try:
-        exp = get_expiry_date()
-        exp_str = exp.strftime("%d-%b-%Y").upper()
-        url = base_url_global + "placeOrder/placeOrder"
-        sess = real_session_global if real_session_global else session_id_global
-        headers = {"Content-Type": "application/json","Authorization": f"Bearer {USER_ID} {sess}","userId": USER_ID,"sessionId": sess}
-        payload = {"userId": USER_ID,"sessionId": sess,"tradingSymbol": f"NIFTY {strike} {side}","exchange": "NFO","transactionType": "BUY","orderType": "MARKET","productType": "MIS","quantity": qty,"price": "0","triggerPrice": "0","expiry": exp_str,"strike": str(strike),"optionType": side}
-        print(f"V3 Order URL:{url} Payload:{payload}", flush=True)
-        r = requests.post(url, json=payload, headers=headers, timeout=20)
-        print(f"V3 Order Status:{r.status_code} Body:{r.text[:600]}", flush=True)
-        return r.status_code, r.text[:600]
-    except Exception as e:
-        return 0, str(e)
+        df = yf.download("^NSEI", interval="1m", period="1d", progress=False, auto_adjust=False)
+        if df is not None and len(df) > 0:
+            return safe_float(df.iloc[-1]['Close'])
+    except:
+        pass
+    return 0
+
+def place_order_direct_v2(strike, side, qty):
+    exp = get_expiry_date()
+    exp_str = exp.strftime("%d-%b-%Y").upper()
+    sess = real_session_global if real_session_global else session_id_global
+    headers = {"Content-Type": "application/json","Authorization": f"Bearer {USER_ID} {sess}","userId": USER_ID,"sessionId": sess}
+    payload = {"userId": USER_ID,"sessionId": sess,"tradingSymbol": f"NIFTY {strike} {side}","exchange": "NFO","transactionType": "BUY","orderType": "MARKET","productType": "MIS","quantity": qty,"price": "0","triggerPrice": "0","expiry": exp_str,"strike": str(strike),"optionType": side}
+    urls = [
+        base_url_global + "placeOrder/executePlaceOrder",
+        base_url_global + "placeOrder/placeOrder",
+        base_url_global + "placeOrder/placeOrderV2",
+    ]
+    last_body = ""
+    last_code = 0
+    for url in urls:
+        try:
+            print(f"TRY ORDER URL:{url} Payload:{payload}", flush=True)
+            r = requests.post(url, json=payload, headers=headers, timeout=20)
+            print(f"Order URL:{url} Status:{r.status_code} Body:{r.text[:800]}", flush=True)
+            last_code = r.status_code
+            last_body = r.text[:800]
+            if r.status_code == 200:
+                return r.status_code, r.text[:800], url
+            if r.status_code != 404:
+                return r.status_code, r.text[:800], url
+        except Exception as e:
+            last_body = str(e)
+    return last_code, last_body, urls[-1]
 
 def place_trade(side, price, nifty_price):
     state["in_trade"] = True
@@ -207,15 +217,15 @@ def place_trade(side, price, nifty_price):
             if not real_session_global and not session_id_global:
                 alice_login()
                 if not real_session_global and not session_id_global:
-                    state["reason"] = "LIVE FAILED - No Real Session - /login la Login pannunga"
+                    state["reason"] = "LIVE FAILED - No Session"
                     state["live_order"] = "FAILED - No Session"
                     state["in_trade"] = False
                     return
             strike = round(float(nifty_price) / 50) * 50
-            qty = 75 * LOTS
-            code, body = place_order_direct_v2(strike, side, qty)
-            state["reason"] = f"LIVE ORDER TRY V3 - NIFTY {strike} {side} x {LOTS} - Status:{code}"
-            state["live_order"] = f"V3 DIRECT - Status:{code} Body:{body}"
+            qty = LOT_SIZE * LOTS
+            code, body, url = place_order_direct_v2(strike, side, qty)
+            state["reason"] = f"LIVE ORDER TRY V5 - NIFTY {strike} {side} x {LOTS} Lot (Qty {qty}) - Status:{code}"
+            state["live_order"] = f"V5 - URL:{url} Status:{code} Body:{body}"
         except Exception as e:
             state["reason"] = f"LIVE ORDER FAILED: {e}"
             state["live_order"] = f"FAILED: {e}"
@@ -230,11 +240,10 @@ def bot_loop():
             state["last_update"] = ist.strftime("%d-%m-%Y %H:%M:%S IST")
             today = ist.strftime("%d-%m-%Y")
             if MODE == "LIVE" and not real_session_global and (time.time() - last_login_try > 60):
-                print("AUTO RETRY LOGIN - 60 Sec", flush=True)
                 try:
                     alice_login()
-                except Exception as e:
-                    print(f"Auto Retry Err: {e}", flush=True)
+                except:
+                    pass
             if trade_done_today != today and ist.hour < 9:
                 trade_done_today = ""
                 state["in_trade"] = False
@@ -251,7 +260,7 @@ def bot_loop():
                     try:
                         c1_o = safe_float(c1['Open']); c1_c = safe_float(c1['Close'])
                         c2_o = safe_float(c2['Open']); c2_c = safe_float(c2['Close'])
-                    except Exception as e:
+                    except:
                         state["reason"] = "Candle Parse Error"
                         trade_done_today = today
                         time.sleep(10); continue
@@ -291,21 +300,25 @@ except Exception as e:
 def home():
     login_url = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
     return f"""
-    <h1>ALICE BOT - NIFTY 2ND CANDLE FLIP - {state['mode']} - V3 FIX</h1>
+    <h1>ALICE BOT - NIFTY 2ND CANDLE FLIP - {state['mode']} - V5 LOT 65</h1>
     <p>Time: {state['last_update']}</p>
-    <p>Login: {state['login']} | Mode: <b>{state['mode']}</b></p>
+    <p>Login: {state['login']} | Mode: <b>{state['mode']}</b> | Lot Size: <b>{LOT_SIZE} (Nifty New Lot)</b></p>
     <p>Signal: {state['signal']}</p>
     <p>Candle1: {state['candle1']}</p>
     <p>Candle2: {state['candle2']}</p>
     <p>In Trade: {state['in_trade']} Side: {state['side']} Entry: {state['entry']}</p>
     <p>Reason: {state['reason']}</p>
     <p>Live Order: {state['live_order']}</p>
+    <p>Test Order Result: {state['test_order_result']}</p>
     <p>Session: {state['session_id']} | Real: {state['real_session']}</p>
     <hr>
+    <h3 style='color:red'>REAL TEST ORDER - NO MONEY TEST - 1 LOT = 65 QTY</h3>
+    <p><a href='/test-order-confirm' style='background:orange; padding:10px; color:black;'><b>TEST ORDER - NIFTY ATM CE - 65 QTY - CLICK</b></a></p>
+    <p>Money Illa - Order Reject Aanaalum Paravalla - Error Paakalaam - Login Correct-a nu Theriyum</p>
+    <hr>
     <h3>LOGIN:</h3>
-    <p><a href='/login' target='_blank'><b>/login - Alice la Login</b></a> | <a href='/setcode'><b>/setcode - Form</b></a> | <a href='/force-login'><b>/force-login</b></a></p>
-    <p>Redirect URL: https://alice-ygyu.onrender.com/callback</p>
-    <p>Direct: <a href='{login_url}' target='_blank'>{login_url}</a></p>
+    <p><a href='/login' target='_blank'><b>/login</b></a> | <a href='/setcode'><b>/setcode</b></a> | <a href='/force-login'><b>/force-login</b></a></p>
+    <p>Redirect: https://alice-ygyu.onrender.com/callback</p>
     <hr>
     <p><a href='/test'><b>/test</b></a> | <a href='/status'>STATUS</a></p>
     <hr>
@@ -329,8 +342,8 @@ def callback():
         auth_code_global = code.strip()
         state["auth_code"] = code[:12] + "***"
         ok = alice_login_v2()
-        return f"<h2>authCode Auto Kidaichiduchu: {code[:15]}***</h2><p>Login: {state['login']}</p><p>Debug: {state['debug']}</p><p>Render la ALICE_AUTH_CODE la Idha Podunga: {code}</p><p><a href='/'>Home</a></p>"
-    return f"<h2>No authCode in Callback</h2><p>Args: {dict(request.args)}</p><p>Full URL: {request.url}</p><p><a href='/setcode'>/setcode la Manual-a Podunga</a> | <a href='/login'>Thirumba Login</a></p>"
+        return f"<h2>authCode Auto Kidaichiduchu: {code[:15]}***</h2><p>Login: {state['login']}</p><p>Debug: {state['debug']}</p><p><a href='/'>Home</a></p>"
+    return f"<h2>No authCode</h2><p>Args: {dict(request.args)}</p><p><a href='/setcode'>/setcode</a> | <a href='/login'>Login</a></p>"
 
 @app.route('/setcode', methods=['GET', 'POST'])
 def setcode():
@@ -341,11 +354,11 @@ def setcode():
         if "authCode=" in code:
             code = code.split("authCode=")[-1].split("&")[0].split()[0]
         if not code or not is_valid_key(code):
-            return f"<h2>authCode Thappu / Empty</h2><p><a href='/setcode'>Thirumba Try</a></p>"
+            return f"<h2>authCode Thappu</h2><p><a href='/setcode'>Try Again</a></p>"
         auth_code_global = code
         state["auth_code"] = code[:12] + "***"
         ok = alice_login_v2()
-        return f"<h2>authCode Set Panniyachu: {code[:15]}***</h2><p>Login Result: {state['login']}</p><p>Debug: {state['debug']}</p><p>Render la ALICE_AUTH_CODE = {code} nu Podunga</p><p><a href='/'>Home</a></p>"
+        return f"<h2>Set Panniyachu: {code[:15]}***</h2><p>Login: {state['login']}</p><p>Debug: {state['debug']}</p><p><a href='/'>Home</a></p>"
     code = request.args.get("authCode") or request.args.get("authcode") or request.args.get("code") or ""
     if code:
         code = code.strip()
@@ -355,46 +368,91 @@ def setcode():
             auth_code_global = code
             state["auth_code"] = code[:12] + "***"
             ok = alice_login_v2()
-            return f"<h2>authCode Set Panniyachu: {code[:15]}***</h2><p>Login Result: {state['login']}</p><p>Debug: {state['debug']}</p><p><a href='/'>Home</a></p>"
+            return f"<h2>Set Panniyachu: {code[:15]}***</h2><p>Login: {state['login']}</p><p>Debug: {state['debug']}</p><p><a href='/'>Home</a></p>"
     return f"""
     <h2>authCode Manual-a Podunga</h2>
     <p>Login: {state['login']}</p>
-    <p>Debug: {state['debug']}</p>
-    <hr>
-    <p><a href='/login' target='_blank'><b>CLICK - /login</b></a> - Login pannunga</p>
-    <hr>
     <form method="POST" action="/setcode">
-        <p>authCode / Full URL:</p>
-        <input type="text" name="authCode" placeholder="authCode-a Inga Paste pannunga" style="width:90%; padding:12px; font-size:16px;" required>
-        <br><br>
-        <button type="submit" style="padding:12px 30px; font-size:18px; background:green; color:white;">LOGIN - SUBMIT</button>
+        <input type="text" name="authCode" placeholder="authCode Paste pannunga" style="width:90%; padding:12px; font-size:16px;" required>
+        <br><br><button type="submit" style="padding:12px 30px; background:green; color:white;">LOGIN</button>
     </form>
-    <hr>
-    <p><a href='/'>Home</a> | <a href='/test'>Test</a></p>
+    <p><a href='/'>Home</a></p>
     """
 
 @app.route('/force-login')
 def force_login():
     ok = alice_login_v2()
-    return f"<h2>Force Login Try Panniyachu</h2><p>Result: {state['login']}</p><p>Debug: {state['debug']}</p><p><a href='/'>Home</a> | <a href='/setcode'>Setcode</a></p>"
+    return f"<h2>Force Login</h2><p>{state['login']}</p><p>{state['debug']}</p><p><a href='/'>Home</a></p>"
+
+@app.route('/test-order-confirm')
+def test_order_confirm():
+    nifty = get_nifty_price()
+    strike = round(float(nifty)/50)*50 if nifty else 0
+    return f"""
+    <h2 style='color:red'>CONFIRM REAL TEST ORDER - NO MONEY TEST</h2>
+    <p>Login: {state['login']}</p>
+    <p>Nifty Now: {nifty}</p>
+    <p>Strike: {strike} CE - 1 Lot = <b>65 Qty</b> - MIS - MARKET - BUY</p>
+    <p>Account la Money Illa - Order Reject Aagum - Adhu thaan Test!</p>
+    <p>Expected Error: Insufficient Funds / Margin Low - Adhu Vandha SUCCESS</p>
+    <p>Bad Error: 401 / 404 / Invalid Session - Adhu Vandha FAIL</p>
+    <hr>
+    <p><a href='/test-order-do' style='background:red; color:white; padding:15px 30px;'><b>YES - REAL TEST ORDER PODU - 65 QTY</b></a></p>
+    <br><br>
+    <p><a href='/'>NO - Cancel</a></p>
+    """
+
+@app.route('/test-order-do')
+def test_order_do():
+    nifty = get_nifty_price()
+    if not nifty:
+        nifty = 26000
+    strike = round(float(nifty)/50)*50
+    qty = LOT_SIZE * LOTS
+    print(f"TEST ORDER START - NIFTY {nifty} Strike {strike} CE Qty {qty} LOT_SIZE {LOT_SIZE}", flush=True)
+    if MODE == "PAPER":
+        state["test_order_result"] = f"PAPER TEST - NIFTY {strike} CE x {qty} - No Real Order"
+        return f"<h2>PAPER TEST</h2><p>{state['test_order_result']}</p><p>MODE=LIVE nu Maathunga - Real Test ku</p><p><a href='/'>Home</a></p>"
+    if not real_session_global and not session_id_global:
+        alice_login_v2()
+    code, body, url = place_order_direct_v2(strike, "CE", qty)
+    state["test_order_result"] = f"REAL TEST ORDER - NIFTY {strike} CE x {qty} (Lot 65) - URL:{url} Status:{code} Body:{body}"
+    state["live_order"] = state["test_order_result"]
+    # Result Interpretation
+    bl = body.lower()
+    if "insufficient" in bl or "margin" in bl or "fund" in bl or "balance" in bl or "ledger" in bl:
+        interp = "<h3 style='color:green'>✅ SUCCESS! - Order API Correct! Money Mattum Illa! Login + Order Working!</h3>"
+    elif "invalid" in bl or "session" in bl or "unauthor" in bl or "401" in str(code):
+        interp = "<h3 style='color:red'>❌ FAIL - Session / Login Problem - /login la Thirumba Login pannunga</h3>"
+    elif code == 200:
+        interp = "<h3 style='color:green'>✅ ORDER PLACED! - Alice App la Check pannunga - Money Irundha Order Poirukkum!</h3>"
+    elif code == 404:
+        interp = "<h3 style='color:red'>❌ FAIL - Order Endpoint 404 - Alice Endpoint Maariyiduchu</h3>"
+    else:
+        interp = f"<h3>Result: Status {code} - Body Paaru - Screenshot Anuppunga</h3>"
+    return f"""
+    <h2>REAL TEST ORDER RESULT - LOT 65</h2>
+    <p>Nifty: {nifty} Strike: {strike} CE Qty: {qty} (65 x 1 Lot)</p>
+    <p>URL: {url}</p>
+    <p>Status: {code}</p>
+    <p>Body: {body}</p>
+    <hr>
+    {interp}
+    <hr>
+    <p><a href='/'>Home</a></p>
+    """
 
 @app.route('/test')
 def test_encpkey():
     out = []
-    out.append(f"<p>USER_ID: {USER_ID} | APP_ID: {APP_ID} | MODE: {MODE} | AUTHCODE_LEN: {len(auth_code_global)}</p>")
+    out.append(f"<p>USER_ID: {USER_ID} | APP_ID: {APP_ID} | MODE: {MODE} | LOT: {LOT_SIZE} | AUTHCODE_LEN: {len(auth_code_global)}</p>")
     base = "https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/"
     try:
         r = requests.post(base + "customer/getAPIEncpkey", json={"userId": USER_ID}, timeout=10, headers={"Content-Type": "application/json"})
         out.append(f"<p>Status: {r.status_code}<br>Body: {r.text[:800]}</p>")
-        j = r.json()
-        enc = j.get("encKey")
-        if not is_valid_key(enc):
-            out.append(f"<p style='color:red'><b>Encpkey NULL - {j.get('emsg')}</b></p>")
-        else:
-            out.append(f"<p style='color:green'><b>Encpkey OK: {str(enc)[:20]}***</b></p>")
     except Exception as e:
-        out.append(f"<p style='color:red'><b>ERROR: {e}</b></p>")
-    return "<h2>Encpkey Test</h2>" + "".join(out) + "<br><a href='/'>Home</a> | <a href='/test'>Test Again</a> | <a href='/login'>Login</a> | <a href='/setcode'>Setcode</a>"
+        out.append(f"<p>ERROR: {e}</p>")
+    return "<h2>Test</h2>" + "".join(out) + "<br><a href='/'>Home</a>"
 
 @app.route('/status')
 def status():
