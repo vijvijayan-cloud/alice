@@ -1,4 +1,4 @@
-import os, time, traceback, hashlib, json
+import os, time, traceback, hashlib, json, inspect
 from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, request, redirect
 import threading
@@ -23,14 +23,13 @@ try: LOTS = int(os.getenv("LOTS", "1"))
 except: LOTS = 1
 LOT_SIZE = 65
 
-state = {"strategy":"NIFTY_2ND_CANDLE_FLIP","mode":MODE,"login":"STARTING...","nifty_price":0,"signal":"WAITING FOR 9:20","in_trade":False,"side":"","entry":0,"pnl":0,"reason":"","last_update":"","candle1":"","candle2":"","live_order":"","debug":"Waiting...","session_id":"","real_session":"","api_version":"V7_OFFICIAL_SDK","login_url":"","auth_code":"","test_order_result":"","lot_size":LOT_SIZE}
+state = {"strategy":"NIFTY_2ND_CANDLE_FLIP","mode":MODE,"login":"STARTING...","nifty_price":0,"signal":"WAITING FOR 9:20","in_trade":False,"side":"","entry":0,"pnl":0,"reason":"","last_update":"","candle1":"","candle2":"","live_order":"","debug":"Waiting...","session_id":"","real_session":"","api_version":"V8_AUTO_SDK","login_url":"","auth_code":"","test_order_result":"","lot_size":LOT_SIZE,"sdk_methods":""}
 
 def get_ist():
     return datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
 
 session_id_global = ""
 real_session_global = ""
-enc_key_global = ""
 base_url_global = "https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/"
 auth_code_global = AUTH_CODE
 last_login_try = 0
@@ -44,49 +43,111 @@ def is_valid_key(k):
 def alice_login_v2():
     global session_id_global, real_session_global, last_login_try
     last_login_try=time.time()
-    # V7: Official SDK - login_and_get_access_token(username, password, twoFA, api_secret, app_id)
-    # Idhu Ulla Encpkey + SHA + getSessionID Ella Correct-a Pannidum
     try:
-        print(f"V7 SDK LOGIN TRY USER:{USER_ID} APP_ID:{APP_ID} SECRET_LEN:{len(APP_SECRET)} 2FA_LEN:{len(DOB_YEAR)}", flush=True)
-        state["debug"] = f"SDK Login Try USER:{USER_ID} APP_ID:{APP_ID} SECRET_LEN:{len(APP_SECRET)} 2FA:{DOB_YEAR[:2]}***"
-        if not USER_ID or not PASSWORD or not APP_SECRET or not APP_ID:
-            state["login"] = "NEED CREDENTIALS - Render la ALICE_USER_ID / PASSWORD / APP_ID / APP_SECRET Check pannunga"
-            return False
-        if not DOB_YEAR:
-            state["login"] = "NEED 2FA - Render la ALICE_YEAR = Birth Year (eg 1990) Podunga - 2FA = Year of Birth"
+        print(f"V8 SDK LOGIN USER:{USER_ID} APP:{APP_ID} SEC_LEN:{len(APP_SECRET)} 2FA:{DOB_YEAR}", flush=True)
+        state["debug"] = f"V8 Try USER:{USER_ID} APP:{APP_ID} SEC:{len(APP_SECRET)} 2FA:{DOB_YEAR}"
+        if not USER_ID or not PASSWORD or not APP_SECRET or not APP_ID or not DOB_YEAR:
+            state["login"] = "NEED CREDENTIALS - USER/PASS/YEAR/APP_ID/APP_SECRET Check pannunga"
             return False
         try:
             from alice_blue import AliceBlue
         except Exception as e:
-            state["login"] = f"SDK NOT INSTALLED - requirements.txt la alice-blue Podunga - Error:{e}"
-            state["debug"] += f" | SDK Import Fail:{e}"
-            return False
-        # SDK Call - Idhu thaan Correct Method
-        token = AliceBlue.login_and_get_access_token(username=USER_ID, password=PASSWORD, twoFA=DOB_YEAR, api_secret=APP_SECRET, app_id=APP_ID)
-        print(f"SDK Token Got:{str(token)[:30]}*** Len:{len(str(token))}", flush=True)
-        state["debug"] += f" | SDK Token Len:{len(str(token))} Token:{str(token)[:20]}***"
+            state["login"] = f"SDK NOT INSTALLED: {e}"; return False
+        # STEP 1 - SDK la Enna Method Irukku nu Paaru
+        methods = [m for m in dir(AliceBlue) if not m.startswith("_")]
+        state["sdk_methods"] = str(methods)
+        print(f"SDK Methods Available: {methods}", flush=True)
+        state["debug"] += f" | SDK Methods: {methods}"
+        token = None
+        last_err = ""
+        # STEP 2 - Ella Possible Method Per-a Try pannu
+        # Pudhu SDK la Method Per Vera Irukkalaam - Ella Try pannuvom
+        candidates = ["login_and_get_access_token","get_access_token","login","generate_access_token","get_session","create_session","generate_session","get_token"]
+        for name in candidates:
+            if hasattr(AliceBlue, name):
+                try:
+                    fn = getattr(AliceBlue, name)
+                    print(f"TRY SDK Method: {name} Sig:{inspect.signature(fn) if hasattr(inspect,'signature') else '?'}", flush=True)
+                    # Different Signature Try pannu
+                    tried = False
+                    for kwargs in [
+                        {"username":USER_ID,"password":PASSWORD,"twoFA":DOB_YEAR,"api_secret":APP_SECRET,"app_id":APP_ID},
+                        {"username":USER_ID,"password":PASSWORD,"twoFA":DOB_YEAR,"api_secret":APP_SECRET},
+                        {"userId":USER_ID,"password":PASSWORD,"twoFA":DOB_YEAR,"api_secret":APP_SECRET,"app_id":APP_ID},
+                        {"username":USER_ID,"password":PASSWORD,"twoFA":DOB_YEAR,"api_secret":APP_SECRET,"app_id":APP_ID,"appId":APP_ID},
+                    ]:
+                        try:
+                            # Static method-a? Instance method-a? Check pannu
+                            res = fn(**kwargs) if not isinstance(fn, type) else None
+                            print(f"Method {name} Kwargs {list(kwargs.keys())} Res:{str(res)[:200]}", flush=True)
+                            if res:
+                                # Res Token-a? Dict-a? Object-a?
+                                if isinstance(res, dict):
+                                    token = res.get("access_token") or res.get("token") or res.get("sessionId") or res.get("session_id") or str(res)
+                                elif isinstance(res, str) and len(res)>10:
+                                    token = res
+                                else:
+                                    # Object la access_token attribute Irukka?
+                                    token = getattr(res, "access_token", None) or getattr(res, "token", None) or getattr(res, "sessionId", None) or str(res) if res else None
+                                if token and is_valid_key(str(token)) and len(str(token))>10:
+                                    break
+                        except Exception as e:
+                            last_err = str(e)
+                            print(f"Method {name} kwargs fail: {e}", flush=True)
+                            continue
+                    if token and is_valid_key(str(token)) and len(str(token))>10:
+                        break
+                except Exception as e:
+                    last_err = str(e)
+                    continue
+        # STEP 3 - Method Illana - Constructor la Token Edukkura Try
         if not token or not is_valid_key(str(token)):
-            state["login"] = f"SDK TOKEN EMPTY - Password / 2FA / App Secret Thappu - Token:{token}"
+            try:
+                print("TRY Constructor Method", flush=True)
+                # AliceBlue(username, password, access_token=None) - Illana login pannidum?
+                # Vera Signature: AliceBlue(username, password, twoFA, api_secret, app_id)
+                for kwargs in [
+                    {"username":USER_ID,"password":PASSWORD,"twoFA":DOB_YEAR,"api_secret":APP_SECRET,"app_id":APP_ID},
+                    {"username":USER_ID,"password":PASSWORD,"access_token":None},
+                ]:
+                    try:
+                        obj = AliceBlue(**kwargs)
+                        print(f"Constructor Obj: {obj} Dir:{[m for m in dir(obj) if 'token' in m.lower() or 'session' in m.lower()]}", flush=True)
+                        t = getattr(obj, "access_token", None) or getattr(obj, "token", None) or getattr(obj, "session_id", None) or getattr(obj, "sessionId", None)
+                        if t and is_valid_key(str(t)):
+                            token = str(t); break
+                        # get_access_token method instance la Irukka?
+                        for mn in ["get_access_token","login","get_session"]:
+                            if hasattr(obj, mn):
+                                try:
+                                    r = getattr(obj, mn)()
+                                    if r and isinstance(r, str) and len(r)>10: token=r; break
+                                except: pass
+                        if token: break
+                    except Exception as e:
+                        last_err=str(e); print(f"Constructor fail: {e}", flush=True); continue
+            except Exception as e:
+                last_err=str(e)
+        if not token or not is_valid_key(str(token)):
+            state["login"] = f"SDK LOGIN FAIL - Methods:{methods} - LastErr:{last_err[:300]} - /test la Paaru"
             return False
-        session_id_global = str(token)
-        real_session_global = str(token)
-        state["session_id"] = str(token)[:12]+"***"
-        state["real_session"] = str(token)[:12]+"***"
-        state["login"] = f"LIVE READY V7 - User {USER_ID[:3]}*** - LOT 65 - OFFICIAL SDK TOKEN OK"
-        print("V7 LOGIN SUCCESS", flush=True)
+        # Token Object-a Irundha String-a Maathu
+        if not isinstance(token, str):
+            token = str(token)
+        # Token Dict String-a Irundha - Clean pannu
+        if token.startswith("{"):
+            try:
+                d=json.loads(token); token=d.get("access_token") or d.get("token") or token
+            except: pass
+        session_id_global = token; real_session_global = token
+        state["session_id"]=token[:12]+"***"; state["real_session"]=token[:12]+"***"
+        state["login"]=f"LIVE READY V8 - User {USER_ID[:3]}*** - LOT 65 - SDK AUTO TOKEN OK"
+        print(f"V8 LOGIN SUCCESS Token:{token[:12]}***", flush=True)
         return True
     except Exception as e:
-        err = str(e)
-        print(f"V7 SDK LOGIN FAIL: {err}", flush=True)
         print(traceback.format_exc(), flush=True)
-        state["debug"] += f" | SDK Fail:{err[:500]}"
-        # Common Errors - User ku Puriyura Maadhiri
-        if "Invalid" in err or "invalid" in err:
-            state["login"] = f"SDK LOGIN FAIL - Password / 2FA / App Secret Thappu - Error:{err[:200]}"
-        elif "2FA" in err or "twoFA" in err or "Year" in err:
-            state["login"] = f"SDK LOGIN FAIL - 2FA Thappu - ALICE_YEAR = Birth Year Correct-a? Error:{err[:200]}"
-        else:
-            state["login"] = f"SDK LOGIN FAIL - {err[:300]}"
+        state["debug"]+=f" | V8 Fail:{str(e)[:500]}"
+        state["login"]=f"SDK LOGIN FAIL - {str(e)[:300]}"
         return False
 
 def alice_login():
@@ -129,9 +190,9 @@ def place_order_direct_v2(strike, side, qty):
     last_body=""; last_code=0
     for url in urls:
         try:
-            print(f"TRY ORDER URL:{url} Payload:{payload}",flush=True)
+            print(f"TRY ORDER {url} {payload}",flush=True)
             r=requests.post(url, json=payload, headers=headers, timeout=20)
-            print(f"Order URL:{url} Status:{r.status_code} Body:{r.text[:800]}",flush=True)
+            print(f"Order {url} St:{r.status_code} Body:{r.text[:800]}",flush=True)
             last_code=r.status_code; last_body=r.text[:800]
             if r.status_code==200: return r.status_code,r.text[:800],url
             if r.status_code!=404: return r.status_code,r.text[:800],url
@@ -150,8 +211,8 @@ def place_trade(side, price, nifty_price):
                     state["reason"]="LIVE FAILED - No Session"; state["live_order"]="FAILED - No Session"; state["in_trade"]=False; return
             strike=round(float(nifty_price)/50)*50; qty=LOT_SIZE*LOTS
             code,body,url=place_order_direct_v2(strike,side,qty)
-            state["reason"]=f"LIVE ORDER V7 - NIFTY {strike} {side} x {LOTS} Lot (Qty {qty}) - Status:{code}"
-            state["live_order"]=f"V7 - URL:{url} Status:{code} Body:{body}"
+            state["reason"]=f"LIVE ORDER V8 - NIFTY {strike} {side} x {LOTS} Lot (Qty {qty}) - Status:{code}"
+            state["live_order"]=f"V8 - URL:{url} Status:{code} Body:{body}"
         except Exception as e:
             state["reason"]=f"LIVE ORDER FAILED:{e}"; state["live_order"]=f"FAILED:{e}"; print(traceback.format_exc(),flush=True)
 
@@ -192,14 +253,14 @@ except Exception as e: print(f"Thread Error:{e}",flush=True)
 @app.route('/')
 def home():
     return f"""
-    <h1>ALICE BOT - NIFTY 2ND CANDLE FLIP - {state['mode']} - V7 OFFICIAL SDK</h1>
+    <h1>ALICE BOT - NIFTY 2ND CANDLE FLIP - {state['mode']} - V8 AUTO SDK</h1>
     <p>Time: {state['last_update']}</p><p>Login: {state['login']} | Mode: <b>{state['mode']}</b> | Lot: <b>{LOT_SIZE}</b></p>
     <p>Signal: {state['signal']}</p><p>Candle1: {state['candle1']}</p><p>Candle2: {state['candle2']}</p>
     <p>In Trade: {state['in_trade']} Side: {state['side']} Entry: {state['entry']}</p><p>Reason: {state['reason']}</p><p>Live Order: {state['live_order']}</p><p>Test: {state['test_order_result']}</p><p>Session: {state['session_id']}</p>
     <hr><h3 style='color:red'>REAL TEST ORDER - NO MONEY TEST - 65 QTY</h3>
     <p><a href='/test-order-confirm' style='background:orange; padding:10px; color:black;'><b>TEST ORDER - NIFTY ATM CE - 65 QTY</b></a></p>
-    <hr><p><a href='/force-login'><b>/force-login - SDK Login</b></a> | <a href='/test'>/test</a> | <a href='/status'>STATUS</a></p>
-    <hr><h3>DEBUG:</h3><p>{state['debug']}</p><p>USER:{USER_ID} APP_ID:{APP_ID} SECRET_LEN:{len(APP_SECRET)} 2FA_LEN:{len(DOB_YEAR)} PASS_LEN:{len(PASSWORD)}</p>
+    <hr><p><a href='/force-login'><b>/force-login - SDK Auto Login</b></a> | <a href='/test'>/test - SDK Methods Paaru</a> | <a href='/status'>STATUS</a></p>
+    <hr><h3>DEBUG:</h3><p>{state['debug']}</p><p>SDK Methods: {state['sdk_methods']}</p><p>USER:{USER_ID} APP:{APP_ID} SEC_LEN:{len(APP_SECRET)} 2FA:{DOB_YEAR} PASS_LEN:{len(PASSWORD)}</p>
     <script>setTimeout(()=>location.reload(),10000)</script>
     """
 
@@ -207,25 +268,20 @@ def home():
 def login_redirect(): return redirect(f"https://ant.aliceblueonline.com/?appcode={APP_ID}")
 
 @app.route('/callback')
-def callback():
-    global auth_code_global
-    code=request.args.get("authCode") or ""
-    if code and is_valid_key(code): auth_code_global=code; ok=alice_login_v2(); return f"<h2>Login: {state['login']}</h2><p>{state['debug']}</p><p><a href='/'>Home</a></p>"
-    return f"<h2>No authCode - SDK Method la authCode Thevai Illa - /force-login Click pannunga</h2><p><a href='/force-login'>Force Login</a></p>"
+def callback(): return f"<h2>V8 la authCode Thevai Illa</h2><p><a href='/force-login'>Force Login</a></p>"
 
 @app.route('/setcode', methods=['GET','POST'])
-def setcode():
-    return f"""<h2>V7 la authCode Thevai Illa - SDK Method</h2><p>Login: {state['login']}</p><p>Render la Iva Irukka nu Paaru: ALICE_USER_ID, ALICE_PASSWORD, ALICE_YEAR (Birth Year), ALICE_APP_ID, ALICE_APP_SECRET</p><p><a href='/force-login'>Force Login</a> | <a href='/'>Home</a></p>"""
+def setcode(): return f"""<h2>V8 - SDK Auto Method</h2><p>Login: {state['login']}</p><p><a href='/force-login'>Force Login</a> | <a href='/'>Home</a></p>"""
 
 @app.route('/force-login')
 def force_login():
     ok=alice_login_v2()
-    return f"<h2>Force Login V7 SDK</h2><p>Result: {state['login']}</p><p>Debug: {state['debug']}</p><p>USER:{USER_ID} APP_ID:{APP_ID} SECRET_LEN:{len(APP_SECRET)} 2FA_LEN:{len(DOB_YEAR)} PASS_LEN:{len(PASSWORD)}</p><p><a href='/'>Home</a> | <a href='/test-order-confirm'>Test Order</a></p>"
+    return f"<h2>Force Login V8 Auto SDK</h2><p>Result: {state['login']}</p><p>Debug: {state['debug']}</p><p>SDK Methods: {state['sdk_methods']}</p><p><a href='/'>Home</a> | <a href='/test-order-confirm'>Test Order</a></p>"
 
 @app.route('/test-order-confirm')
 def test_order_confirm():
     nifty=get_nifty_price(); strike=round(float(nifty)/50)*50 if nifty else 0
-    return f"""<h2 style='color:red'>CONFIRM REAL TEST ORDER - NO MONEY TEST</h2><p>Login: {state['login']}</p><p>Nifty: {nifty}</p><p>Strike: {strike} CE - 65 Qty - MIS - MARKET</p><p>Expected: Insufficient Funds - SUCCESS</p><hr><p><a href='/test-order-do' style='background:red; color:white; padding:15px 30px;'><b>YES - REAL TEST ORDER PODU - 65 QTY</b></a></p><br><br><p><a href='/'>NO</a></p>"""
+    return f"""<h2 style='color:red'>CONFIRM REAL TEST ORDER - NO MONEY TEST</h2><p>Login: {state['login']}</p><p>Nifty: {nifty}</p><p>Strike: {strike} CE - 65 Qty - MIS</p><p>Expected: Insufficient Funds - SUCCESS</p><hr><p><a href='/test-order-do' style='background:red; color:white; padding:15px 30px;'><b>YES - REAL TEST ORDER PODU - 65 QTY</b></a></p><br><br><p><a href='/'>NO</a></p>"""
 
 @app.route('/test-order-do')
 def test_order_do():
@@ -241,22 +297,29 @@ def test_order_do():
     elif "401" in str(code) or "invalid" in bl: interp="<h3 style='color:red'>❌ FAIL - Session Problem</h3>"
     elif code==200: interp="<h3 style='color:green'>✅ ORDER PLACED!</h3>"
     else: interp=f"<h3>Status {code} - Screenshot Anuppunga</h3>"
-    return f"""<h2>REAL TEST ORDER RESULT - V7 - LOT 65</h2><p>Nifty:{nifty} Strike:{strike} CE Qty:{qty}</p><p>URL:{url}</p><p>Status:{code}</p><p>Body:{body}</p><hr>{interp}<hr><p><a href='/'>Home</a></p>"""
+    return f"""<h2>REAL TEST ORDER RESULT - V8 - LOT 65</h2><p>Nifty:{nifty} Strike:{strike} CE Qty:{qty}</p><p>URL:{url}</p><p>Status:{code}</p><p>Body:{body}</p><hr>{interp}<hr><p><a href='/'>Home</a></p>"""
 
 @app.route('/test')
 def test_encpkey():
-    out=[f"<p>USER:{USER_ID} APP_ID:{APP_ID} SECRET_LEN:{len(APP_SECRET)} 2FA_LEN:{len(DOB_YEAR)} PASS_LEN:{len(PASSWORD)}</p>"]
+    out=[f"<p>USER:{USER_ID} APP:{APP_ID} SEC_LEN:{len(APP_SECRET)} 2FA:{DOB_YEAR} PASS_LEN:{len(PASSWORD)}</p>"]
     try:
         from alice_blue import AliceBlue
-        out.append("<p>SDK Installed: YES</p>")
-        # SDK Login Try - Real Error Kaatum
-        try:
-            t=AliceBlue.login_and_get_access_token(username=USER_ID, password=PASSWORD, twoFA=DOB_YEAR, api_secret=APP_SECRET, app_id=APP_ID)
-            out.append(f"<p style='color:green'>SDK LOGIN SUCCESS Token:{str(t)[:30]}*** Len:{len(str(t))}</p>")
-        except Exception as e:
-            out.append(f"<p style='color:red'>SDK LOGIN FAIL: {e}</p>")
-    except Exception as e: out.append(f"<p style='color:red'>SDK NOT INSTALLED: {e} - requirements.txt la alice-blue Podunga</p>")
-    return "<h2>Test V7 SDK</h2>"+"".join(out)+"<br><a href='/'>Home</a> | <a href='/force-login'>Force Login</a>"
+        import inspect as ins
+        methods=[m for m in dir(AliceBlue) if not m.startswith("_")]
+        out.append(f"<p><b>SDK Class Methods:</b> {methods}</p>")
+        for m in methods:
+            try:
+                fn=getattr(AliceBlue,m)
+                out.append(f"<p>Method: {m} - {ins.signature(fn) if callable(fn) else type(fn)}</p>")
+            except Exception as e: out.append(f"<p>Method: {m} - Err:{e}</p>")
+        # Module la Vera Function Irukka?
+        import alice_blue as mod
+        out.append(f"<p><b>Module Attrs:</b> {[x for x in dir(mod) if not x.startswith('_')]}</p>")
+        # File Path - Source Paakalaam
+        try: out.append(f"<p>SDK File: {ins.getfile(AliceBlue)}</p>")
+        except: pass
+    except Exception as e: out.append(f"<p style='color:red'>SDK ERR:{e}</p>")
+    return "<h2>Test V8 - SDK Methods</h2>"+"".join(out)+"<br><a href='/'>Home</a> | <a href='/force-login'>Force Login</a>"
 
 @app.route('/status')
 def status(): return jsonify(state)
