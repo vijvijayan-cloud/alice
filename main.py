@@ -16,16 +16,14 @@ PASSWORD = clean_env("ALICE_PASSWORD")
 TOTP_SECRET = clean_env("ALICE_TOTP_SECRET")
 APP_ID = clean_env("ALICE_APP_ID")
 APP_SECRET = clean_env("ALICE_APP_SECRET")
-DOB_YEAR = clean_env("ALICE_YEAR") or clean_env("ALICE_DOB_YEAR") or clean_env("ALICE_2FA")
+DOB_YEAR = clean_env("ALICE_YEAR") or clean_env("ALICE_DOB_YEAR") or clean_env("ALICE_2FA") or clean_env("ALICE_TWOFA")
 AUTH_CODE = clean_env("ALICE_AUTH_CODE")
 MODE = os.getenv("MODE", "PAPER")
-try:
-    LOTS = int(os.getenv("LOTS", "1"))
-except:
-    LOTS = 1
+try: LOTS = int(os.getenv("LOTS", "1"))
+except: LOTS = 1
 LOT_SIZE = 65
 
-state = {"strategy":"NIFTY_2ND_CANDLE_FLIP","mode":MODE,"login":"STARTING...","nifty_price":0,"signal":"WAITING FOR 9:20","in_trade":False,"side":"","entry":0,"pnl":0,"reason":"","last_update":"","candle1":"","candle2":"","live_order":"","debug":"Waiting...","session_id":"","real_session":"","api_version":"V6_SHA256_REAL_SESSION","login_url":"","auth_code":"","test_order_result":"","lot_size":LOT_SIZE}
+state = {"strategy":"NIFTY_2ND_CANDLE_FLIP","mode":MODE,"login":"STARTING...","nifty_price":0,"signal":"WAITING FOR 9:20","in_trade":False,"side":"","entry":0,"pnl":0,"reason":"","last_update":"","candle1":"","candle2":"","live_order":"","debug":"Waiting...","session_id":"","real_session":"","api_version":"V7_OFFICIAL_SDK","login_url":"","auth_code":"","test_order_result":"","lot_size":LOT_SIZE}
 
 def get_ist():
     return datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
@@ -40,79 +38,56 @@ last_login_try = 0
 def is_valid_key(k):
     if not k: return False
     k=str(k).strip()
-    if k.lower() in ["null","none","","no","available","no available"]: return False
+    if k.lower() in ["null","none","","no","available"]: return False
     return True
 
-def try_encpkey():
-    global base_url_global, enc_key_global
-    base = "https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/"
-    try:
-        r = requests.post(base + "customer/getAPIEncpkey", json={"userId": USER_ID}, timeout=10, headers={"Content-Type":"application/json"})
-        print(f"Encpkey St:{r.status_code} Body:{r.text[:600]}", flush=True)
-        state["debug"] = f"Encpkey St:{r.status_code} Body:{r.text[:250]}"
-        if r.status_code==200 and r.text.strip():
-            try: j=r.json()
-            except: return "",base,"JSON Fail"
-            enc=j.get("encKey") or ""
-            if not is_valid_key(enc): return "",base,j.get("emsg") or "Encpkey NULL"
-            enc_key_global=enc; base_url_global=base
-            return enc,base,"OK"
-    except Exception as e:
-        state["debug"]=f"Encpkey Err:{e}"
-    return "",base,"Fail"
-
 def alice_login_v2():
-    global session_id_global, real_session_global, enc_key_global, base_url_global, last_login_try
+    global session_id_global, real_session_global, last_login_try
     last_login_try=time.time()
+    # V7: Official SDK - login_and_get_access_token(username, password, twoFA, api_secret, app_id)
+    # Idhu Ulla Encpkey + SHA + getSessionID Ella Correct-a Pannidum
     try:
-        state["login_url"]=f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
-        enc_key,base,msg=try_encpkey()
-        if not enc_key:
-            state["login"]=f"NEED WEB LOGIN - {msg}"; return False
-        if not APP_SECRET or not is_valid_key(APP_SECRET):
-            state["login"]="NEED APP_SECRET - Render la ALICE_APP_SECRET Check pannunga - App Secret Illana Session Varadhu"; return False
-        # V6 FIX: SHA-256 - USER_ID + APP_SECRET + ENCKEY = Session Hash
-        # Alice Official SDK Method - authCode Thevai Illa
-        combos=[
-            f"{USER_ID}{APP_SECRET}{enc_key}",
-            f"{USER_ID}{enc_key}{APP_SECRET}",
-            f"{USER_ID}{APP_SECRET}",
-        ]
-        real=""
-        last_resp=""
-        for idx,combo in enumerate(combos):
-            h=hashlib.sha256(combo.encode()).hexdigest()
-            print(f"TRY SHA Combo {idx} Hash:{h[:20]}***", flush=True)
-            try:
-                payload={"userId":USER_ID,"userData":h}
-                r2=requests.post(base+"customer/getSessionID", json=payload, timeout=10, headers={"Content-Type":"application/json"})
-                print(f"getSessionID Combo{idx} St:{r2.status_code} Body:{r2.text[:600]}", flush=True)
-                state["debug"]+=f" | Combo{idx} St:{r2.status_code} Body:{r2.text[:200]}"
-                last_resp=r2.text[:500]
-                if r2.status_code==200 and r2.text.strip():
-                    try:
-                        j2=r2.json()
-                        cand=j2.get("sessionId") or j2.get("sessionID") or j2.get("token") or j2.get("accessToken") or j2.get("userSession") or ""
-                        # Error case la sessionId Illadha Irukkum
-                        if is_valid_key(cand) and len(str(cand))>10:
-                            real=str(cand); break
-                        # Stat / emsg check - Success nu Irundha
-                        if j2.get("stat")=="Ok" or j2.get("status")=="success":
-                            if cand: real=str(cand); break
-                    except: pass
-            except Exception as e:
-                print(f"Combo {idx} Err:{e}", flush=True)
-        if not real:
-            state["login"]=f"SESSION FAIL - SHA Hash Work Aagala - Last:{last_resp[:200]} - APP_SECRET Check pannunga"
-            state["session_id"]=""; state["real_session"]=""
+        print(f"V7 SDK LOGIN TRY USER:{USER_ID} APP_ID:{APP_ID} SECRET_LEN:{len(APP_SECRET)} 2FA_LEN:{len(DOB_YEAR)}", flush=True)
+        state["debug"] = f"SDK Login Try USER:{USER_ID} APP_ID:{APP_ID} SECRET_LEN:{len(APP_SECRET)} 2FA:{DOB_YEAR[:2]}***"
+        if not USER_ID or not PASSWORD or not APP_SECRET or not APP_ID:
+            state["login"] = "NEED CREDENTIALS - Render la ALICE_USER_ID / PASSWORD / APP_ID / APP_SECRET Check pannunga"
             return False
-        session_id_global=real; real_session_global=real
-        state["session_id"]=real[:12]+"***"; state["real_session"]=real[:12]+"***"
-        state["login"]=f"LIVE READY V6 - User {USER_ID[:3]}*** - LOT 65 - SHA256 SESSION OK"
-        print(f"LOGIN SUCCESS V6 - Real Session:{real[:12]}***", flush=True)
+        if not DOB_YEAR:
+            state["login"] = "NEED 2FA - Render la ALICE_YEAR = Birth Year (eg 1990) Podunga - 2FA = Year of Birth"
+            return False
+        try:
+            from alice_blue import AliceBlue
+        except Exception as e:
+            state["login"] = f"SDK NOT INSTALLED - requirements.txt la alice-blue Podunga - Error:{e}"
+            state["debug"] += f" | SDK Import Fail:{e}"
+            return False
+        # SDK Call - Idhu thaan Correct Method
+        token = AliceBlue.login_and_get_access_token(username=USER_ID, password=PASSWORD, twoFA=DOB_YEAR, api_secret=APP_SECRET, app_id=APP_ID)
+        print(f"SDK Token Got:{str(token)[:30]}*** Len:{len(str(token))}", flush=True)
+        state["debug"] += f" | SDK Token Len:{len(str(token))} Token:{str(token)[:20]}***"
+        if not token or not is_valid_key(str(token)):
+            state["login"] = f"SDK TOKEN EMPTY - Password / 2FA / App Secret Thappu - Token:{token}"
+            return False
+        session_id_global = str(token)
+        real_session_global = str(token)
+        state["session_id"] = str(token)[:12]+"***"
+        state["real_session"] = str(token)[:12]+"***"
+        state["login"] = f"LIVE READY V7 - User {USER_ID[:3]}*** - LOT 65 - OFFICIAL SDK TOKEN OK"
+        print("V7 LOGIN SUCCESS", flush=True)
         return True
     except Exception as e:
-        state["debug"]+=f" | V6 Exception:{e}"; print(traceback.format_exc(), flush=True); return False
+        err = str(e)
+        print(f"V7 SDK LOGIN FAIL: {err}", flush=True)
+        print(traceback.format_exc(), flush=True)
+        state["debug"] += f" | SDK Fail:{err[:500]}"
+        # Common Errors - User ku Puriyura Maadhiri
+        if "Invalid" in err or "invalid" in err:
+            state["login"] = f"SDK LOGIN FAIL - Password / 2FA / App Secret Thappu - Error:{err[:200]}"
+        elif "2FA" in err or "twoFA" in err or "Year" in err:
+            state["login"] = f"SDK LOGIN FAIL - 2FA Thappu - ALICE_YEAR = Birth Year Correct-a? Error:{err[:200]}"
+        else:
+            state["login"] = f"SDK LOGIN FAIL - {err[:300]}"
+        return False
 
 def alice_login():
     if MODE=="PAPER":
@@ -124,8 +99,7 @@ def get_candles():
         df=yf.download("^NSEI", interval="5m", period="1d", progress=False, auto_adjust=False)
         if df is None or df.empty: return None
         return df
-    except Exception as e:
-        print("Candle Error:",e,flush=True); return None
+    except Exception as e: print("Candle Error:",e,flush=True); return None
 
 def safe_float(x):
     try:
@@ -176,8 +150,8 @@ def place_trade(side, price, nifty_price):
                     state["reason"]="LIVE FAILED - No Session"; state["live_order"]="FAILED - No Session"; state["in_trade"]=False; return
             strike=round(float(nifty_price)/50)*50; qty=LOT_SIZE*LOTS
             code,body,url=place_order_direct_v2(strike,side,qty)
-            state["reason"]=f"LIVE ORDER V6 - NIFTY {strike} {side} x {LOTS} Lot (Qty {qty}) - Status:{code}"
-            state["live_order"]=f"V6 - URL:{url} Status:{code} Body:{body}"
+            state["reason"]=f"LIVE ORDER V7 - NIFTY {strike} {side} x {LOTS} Lot (Qty {qty}) - Status:{code}"
+            state["live_order"]=f"V7 - URL:{url} Status:{code} Body:{body}"
         except Exception as e:
             state["reason"]=f"LIVE ORDER FAILED:{e}"; state["live_order"]=f"FAILED:{e}"; print(traceback.format_exc(),flush=True)
 
@@ -196,10 +170,8 @@ def bot_loop():
                 state["signal"]="CHECKING 2ND CANDLE..."; df=get_candles()
                 if df is not None and len(df)>=2:
                     c1=df.iloc[-2]; c2=df.iloc[-1]
-                    try:
-                        c1_o=safe_float(c1['Open']); c1_c=safe_float(c1['Close']); c2_o=safe_float(c2['Open']); c2_c=safe_float(c2['Close'])
-                    except:
-                        state["reason"]="Candle Parse Error"; trade_done_today=today; time.sleep(10); continue
+                    try: c1_o=safe_float(c1['Open']); c1_c=safe_float(c1['Close']); c2_o=safe_float(c2['Open']); c2_c=safe_float(c2['Close'])
+                    except: state["reason"]="Candle Parse Error"; trade_done_today=today; time.sleep(10); continue
                     c1_color="GREEN" if c1_c>c1_o else "RED"; c2_color="GREEN" if c2_c>c2_o else "RED"
                     state["candle1"]=f"1st {c1_color} O:{c1_o:.1f} C:{c1_c:.1f}"; state["candle2"]=f"2nd {c2_color} O:{c2_o:.1f} C:{c2_c:.1f}"; state["nifty_price"]=round(c2_c,2)
                     if c1_color=="RED" and c2_color=="GREEN": place_trade("CE",c2_c,c2_c)
@@ -220,92 +192,71 @@ except Exception as e: print(f"Thread Error:{e}",flush=True)
 @app.route('/')
 def home():
     return f"""
-    <h1>ALICE BOT - NIFTY 2ND CANDLE FLIP - {state['mode']} - V6 SHA256</h1>
+    <h1>ALICE BOT - NIFTY 2ND CANDLE FLIP - {state['mode']} - V7 OFFICIAL SDK</h1>
     <p>Time: {state['last_update']}</p><p>Login: {state['login']} | Mode: <b>{state['mode']}</b> | Lot: <b>{LOT_SIZE}</b></p>
     <p>Signal: {state['signal']}</p><p>Candle1: {state['candle1']}</p><p>Candle2: {state['candle2']}</p>
-    <p>In Trade: {state['in_trade']} Side: {state['side']} Entry: {state['entry']}</p><p>Reason: {state['reason']}</p><p>Live Order: {state['live_order']}</p><p>Test: {state['test_order_result']}</p><p>Session: {state['session_id']} | Real: {state['real_session']}</p>
+    <p>In Trade: {state['in_trade']} Side: {state['side']} Entry: {state['entry']}</p><p>Reason: {state['reason']}</p><p>Live Order: {state['live_order']}</p><p>Test: {state['test_order_result']}</p><p>Session: {state['session_id']}</p>
     <hr><h3 style='color:red'>REAL TEST ORDER - NO MONEY TEST - 65 QTY</h3>
     <p><a href='/test-order-confirm' style='background:orange; padding:10px; color:black;'><b>TEST ORDER - NIFTY ATM CE - 65 QTY</b></a></p>
-    <hr><h3>LOGIN:</h3><p><a href='/force-login'><b>/force-login - SHA256 Login Try pannu</b></a> | <a href='/login'>/login</a> | <a href='/setcode'>/setcode</a></p>
-    <hr><p><a href='/test'>/test</a> | <a href='/status'>STATUS</a></p><hr><h3>DEBUG:</h3><p>{state['debug']}</p>
+    <hr><p><a href='/force-login'><b>/force-login - SDK Login</b></a> | <a href='/test'>/test</a> | <a href='/status'>STATUS</a></p>
+    <hr><h3>DEBUG:</h3><p>{state['debug']}</p><p>USER:{USER_ID} APP_ID:{APP_ID} SECRET_LEN:{len(APP_SECRET)} 2FA_LEN:{len(DOB_YEAR)} PASS_LEN:{len(PASSWORD)}</p>
     <script>setTimeout(()=>location.reload(),10000)</script>
     """
 
 @app.route('/login')
-def login_redirect():
-    return redirect(f"https://ant.aliceblueonline.com/?appcode={APP_ID}")
+def login_redirect(): return redirect(f"https://ant.aliceblueonline.com/?appcode={APP_ID}")
 
 @app.route('/callback')
 def callback():
     global auth_code_global
-    code=request.args.get("authCode") or request.args.get("authcode") or request.args.get("code") or ""
-    if code and "authCode=" in code: code=code.split("authCode=")[-1].split("&")[0]
-    if code and is_valid_key(code):
-        auth_code_global=code.strip(); state["auth_code"]=code[:12]+"***"; ok=alice_login_v2()
-        return f"<h2>authCode: {code[:15]}***</h2><p>Login: {state['login']}</p><p>Debug: {state['debug']}</p><p><a href='/'>Home</a></p>"
-    return f"<h2>No authCode</h2><p>{dict(request.args)}</p><p><a href='/setcode'>/setcode</a></p>"
+    code=request.args.get("authCode") or ""
+    if code and is_valid_key(code): auth_code_global=code; ok=alice_login_v2(); return f"<h2>Login: {state['login']}</h2><p>{state['debug']}</p><p><a href='/'>Home</a></p>"
+    return f"<h2>No authCode - SDK Method la authCode Thevai Illa - /force-login Click pannunga</h2><p><a href='/force-login'>Force Login</a></p>"
 
 @app.route('/setcode', methods=['GET','POST'])
 def setcode():
-    global auth_code_global
-    if request.method=='POST':
-        code=request.form.get("authCode") or ""; code=code.strip()
-        if "authCode=" in code: code=code.split("authCode=")[-1].split("&")[0].split()[0]
-        if not code or not is_valid_key(code): return f"<h2>authCode Thappu</h2><p><a href='/setcode'>Try Again</a></p>"
-        auth_code_global=code; state["auth_code"]=code[:12]+"***"; ok=alice_login_v2()
-        return f"<h2>Set: {code[:15]}***</h2><p>Login: {state['login']}</p><p>Debug: {state['debug']}</p><p><a href='/'>Home</a></p>"
-    code=request.args.get("authCode") or ""
-    if code:
-        if "authCode=" in code: code=code.split("authCode=")[-1].split("&")[0]
-        if is_valid_key(code):
-            auth_code_global=code; state["auth_code"]=code[:12]+"***"; ok=alice_login_v2()
-            return f"<h2>Set: {code[:15]}***</h2><p>Login: {state['login']}</p><p>Debug: {state['debug']}</p><p><a href='/'>Home</a></p>"
-    return f"""<h2>authCode Podunga</h2><p>Login: {state['login']}</p><form method="POST" action="/setcode"><input type="text" name="authCode" placeholder="authCode" style="width:90%; padding:12px;" required><br><br><button type="submit" style="padding:12px 30px; background:green; color:white;">LOGIN</button></form><p><a href='/'>Home</a></p>"""
+    return f"""<h2>V7 la authCode Thevai Illa - SDK Method</h2><p>Login: {state['login']}</p><p>Render la Iva Irukka nu Paaru: ALICE_USER_ID, ALICE_PASSWORD, ALICE_YEAR (Birth Year), ALICE_APP_ID, ALICE_APP_SECRET</p><p><a href='/force-login'>Force Login</a> | <a href='/'>Home</a></p>"""
 
 @app.route('/force-login')
 def force_login():
     ok=alice_login_v2()
-    return f"<h2>Force Login V6 SHA256</h2><p>Result: {state['login']}</p><p>Debug: {state['debug']}</p><p><a href='/'>Home</a> | <a href='/test-order-confirm'>Test Order</a></p>"
+    return f"<h2>Force Login V7 SDK</h2><p>Result: {state['login']}</p><p>Debug: {state['debug']}</p><p>USER:{USER_ID} APP_ID:{APP_ID} SECRET_LEN:{len(APP_SECRET)} 2FA_LEN:{len(DOB_YEAR)} PASS_LEN:{len(PASSWORD)}</p><p><a href='/'>Home</a> | <a href='/test-order-confirm'>Test Order</a></p>"
 
 @app.route('/test-order-confirm')
 def test_order_confirm():
     nifty=get_nifty_price(); strike=round(float(nifty)/50)*50 if nifty else 0
-    return f"""<h2 style='color:red'>CONFIRM REAL TEST ORDER - NO MONEY TEST</h2><p>Login: {state['login']}</p><p>Nifty: {nifty}</p><p>Strike: {strike} CE - 1 Lot = <b>65 Qty</b> - MIS - MARKET</p><p>Expected: Insufficient Funds / Margin - Adhu Vandha SUCCESS</p><p>Bad: 401 / 404 - FAIL</p><hr><p><a href='/test-order-do' style='background:red; color:white; padding:15px 30px;'><b>YES - REAL TEST ORDER PODU - 65 QTY</b></a></p><br><br><p><a href='/'>NO - Cancel</a></p>"""
+    return f"""<h2 style='color:red'>CONFIRM REAL TEST ORDER - NO MONEY TEST</h2><p>Login: {state['login']}</p><p>Nifty: {nifty}</p><p>Strike: {strike} CE - 65 Qty - MIS - MARKET</p><p>Expected: Insufficient Funds - SUCCESS</p><hr><p><a href='/test-order-do' style='background:red; color:white; padding:15px 30px;'><b>YES - REAL TEST ORDER PODU - 65 QTY</b></a></p><br><br><p><a href='/'>NO</a></p>"""
 
 @app.route('/test-order-do')
 def test_order_do():
     nifty=get_nifty_price()
     if not nifty: nifty=24950
     strike=round(float(nifty)/50)*50; qty=LOT_SIZE*LOTS
-    print(f"TEST ORDER START - Nifty {nifty} Strike {strike} CE Qty {qty}",flush=True)
-    if MODE=="PAPER":
-        state["test_order_result"]=f"PAPER TEST - NIFTY {strike} CE x {qty}"; return f"<h2>PAPER TEST</h2><p>{state['test_order_result']}</p><p><a href='/'>Home</a></p>"
-    if not real_session_global and not session_id_global: alice_login_v2()
+    if MODE=="PAPER": return f"<h2>PAPER</h2><p><a href='/'>Home</a></p>"
+    if not real_session_global: alice_login_v2()
     code,body,url=place_order_direct_v2(strike,"CE",qty)
-    state["test_order_result"]=f"REAL TEST - NIFTY {strike} CE x {qty} - URL:{url} Status:{code} Body:{body}"; state["live_order"]=state["test_order_result"]
+    state["test_order_result"]=f"REAL TEST - NIFTY {strike} CE x {qty} - Status:{code} Body:{body}"; state["live_order"]=state["test_order_result"]
     bl=body.lower()
-    if "insufficient" in bl or "margin" in bl or "fund" in bl or "balance" in bl or "ledger" in bl: interp="<h3 style='color:green'>✅ SUCCESS! - Order API Correct! Money Mattum Illa! Login + Order Working!</h3>"
-    elif "invalid" in bl or "session" in bl or "unauthor" in bl or "401" in str(code): interp="<h3 style='color:red'>❌ FAIL - Session Problem - APP_SECRET Check pannunga - /force-login Try pannunga</h3>"
-    elif code==200: interp="<h3 style='color:green'>✅ ORDER PLACED! Alice App la Check pannunga!</h3>"
-    elif code==404: interp="<h3 style='color:red'>❌ FAIL - Endpoint 404</h3>"
-    else: interp=f"<h3>Result Status {code} - Screenshot Anuppunga</h3>"
-    return f"""<h2>REAL TEST ORDER RESULT - LOT 65 - V6</h2><p>Nifty: {nifty} Strike: {strike} CE Qty: {qty}</p><p>URL: {url}</p><p>Status: {code}</p><p>Body: {body}</p><hr>{interp}<hr><p><a href='/'>Home</a></p>"""
+    if "insufficient" in bl or "margin" in bl or "fund" in bl or "balance" in bl: interp="<h3 style='color:green'>✅ SUCCESS! Order API Correct! Money Mattum Illa!</h3>"
+    elif "401" in str(code) or "invalid" in bl: interp="<h3 style='color:red'>❌ FAIL - Session Problem</h3>"
+    elif code==200: interp="<h3 style='color:green'>✅ ORDER PLACED!</h3>"
+    else: interp=f"<h3>Status {code} - Screenshot Anuppunga</h3>"
+    return f"""<h2>REAL TEST ORDER RESULT - V7 - LOT 65</h2><p>Nifty:{nifty} Strike:{strike} CE Qty:{qty}</p><p>URL:{url}</p><p>Status:{code}</p><p>Body:{body}</p><hr>{interp}<hr><p><a href='/'>Home</a></p>"""
 
 @app.route('/test')
 def test_encpkey():
-    out=[f"<p>USER: {USER_ID} | APP_ID: {APP_ID} | APP_SECRET_LEN: {len(APP_SECRET)} | MODE: {MODE} | LOT: {LOT_SIZE}</p>"]
-    base="https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/"
+    out=[f"<p>USER:{USER_ID} APP_ID:{APP_ID} SECRET_LEN:{len(APP_SECRET)} 2FA_LEN:{len(DOB_YEAR)} PASS_LEN:{len(PASSWORD)}</p>"]
     try:
-        r=requests.post(base+"customer/getAPIEncpkey", json={"userId":USER_ID}, timeout=10, headers={"Content-Type":"application/json"})
-        out.append(f"<p>Encpkey Status:{r.status_code}<br>Body:{r.text[:800]}</p>")
-        j=r.json(); enc=j.get("encKey")
-        if is_valid_key(enc):
-            h=hashlib.sha256(f"{USER_ID}{APP_SECRET}{enc}".encode()).hexdigest()
-            out.append(f"<p>SHA256 Hash (USER+SECRET+ENC): {h[:30]}***</p>")
-            r2=requests.post(base+"customer/getSessionID", json={"userId":USER_ID,"userData":h}, timeout=10, headers={"Content-Type":"application/json"})
-            out.append(f"<p>getSessionID Status:{r2.status_code}<br>Body:{r2.text[:800]}</p>")
-    except Exception as e: out.append(f"<p>ERROR:{e}</p>")
-    return "<h2>Test V6</h2>"+"".join(out)+"<br><a href='/'>Home</a> | <a href='/force-login'>Force Login</a>"
+        from alice_blue import AliceBlue
+        out.append("<p>SDK Installed: YES</p>")
+        # SDK Login Try - Real Error Kaatum
+        try:
+            t=AliceBlue.login_and_get_access_token(username=USER_ID, password=PASSWORD, twoFA=DOB_YEAR, api_secret=APP_SECRET, app_id=APP_ID)
+            out.append(f"<p style='color:green'>SDK LOGIN SUCCESS Token:{str(t)[:30]}*** Len:{len(str(t))}</p>")
+        except Exception as e:
+            out.append(f"<p style='color:red'>SDK LOGIN FAIL: {e}</p>")
+    except Exception as e: out.append(f"<p style='color:red'>SDK NOT INSTALLED: {e} - requirements.txt la alice-blue Podunga</p>")
+    return "<h2>Test V7 SDK</h2>"+"".join(out)+"<br><a href='/'>Home</a> | <a href='/force-login'>Force Login</a>"
 
 @app.route('/status')
 def status(): return jsonify(state)
