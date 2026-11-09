@@ -1,4 +1,4 @@
-import os, time, traceback, hashlib, json, inspect
+import os, time, traceback, hashlib, json, inspect, pyotp
 from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, request, redirect
 import threading
@@ -16,12 +16,13 @@ PASSWORD = clean_env("ALICE_PASSWORD")
 APP_ID = clean_env("ALICE_APP_ID")
 APP_SECRET = clean_env("ALICE_APP_SECRET")
 DOB_YEAR = clean_env("ALICE_YEAR") or clean_env("ALICE_DOB_YEAR") or clean_env("ALICE_2FA")
+TOTP_SECRET = clean_env("ALICE_TOTP_SECRET")
 MODE = os.getenv("MODE", "PAPER")
 try: LOTS = int(os.getenv("LOTS", "1"))
 except: LOTS = 1
 LOT_SIZE = 65
 
-state = {"strategy":"NIFTY_2ND_CANDLE_FLIP","mode":MODE,"login":"STARTING...","nifty_price":0,"signal":"WAITING FOR 9:20","in_trade":False,"side":"","entry":0,"pnl":0,"reason":"","last_update":"","candle1":"","candle2":"","live_order":"","debug":"Waiting...","session_id":"","real_session":"","api_version":"V9_SESSIONID","auth_code":"","test_order_result":"","lot_size":LOT_SIZE}
+state = {"strategy":"NIFTY_2ND_CANDLE_FLIP","mode":MODE,"login":"STARTING...","nifty_price":0,"signal":"WAITING FOR 9:20","in_trade":False,"side":"","entry":0,"pnl":0,"reason":"","last_update":"","candle1":"","candle2":"","live_order":"","debug":"Waiting...","session_id":"","real_session":"","api_version":"V10_CORRECT_ORDER","test_order_result":"","lot_size":LOT_SIZE}
 
 def get_ist():
     return datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
@@ -37,80 +38,95 @@ def is_valid_key(k):
     if k.lower() in ["null","none","","no","available"]: return False
     return True
 
+def get_totp():
+    # TOTP Secret Irundha - Live OTP Generate pannu - Alice twoFA = TOTP aagalam
+    try:
+        if TOTP_SECRET and len(TOTP_SECRET)>10:
+            totp = pyotp.TOTP(TOTP_SECRET)
+            return totp.now()
+    except Exception as e:
+        print(f"TOTP Fail:{e}", flush=True)
+    return None
+
 def alice_login_v2():
     global session_id_global, real_session_global, last_login_try
     last_login_try=time.time()
     try:
-        print(f"V9 LOGIN USER:{USER_ID} APP:{APP_ID} SEC:{len(APP_SECRET)} 2FA:{DOB_YEAR}", flush=True)
-        state["debug"] = f"V9 Try USER:{USER_ID} APP:{APP_ID} SEC:{len(APP_SECRET)} 2FA:{DOB_YEAR}"
-        if not USER_ID or not PASSWORD or not APP_SECRET or not APP_ID or not DOB_YEAR:
-            state["login"] = "NEED CREDENTIALS - USER/PASS/YEAR/APP_ID/APP_SECRET Check pannunga"
+        totp_now = get_totp()
+        print(f"V10 LOGIN USER:{USER_ID} APP:{APP_ID} SEC_LEN:{len(APP_SECRET)} DOB:{DOB_YEAR} TOTP:{totp_now} PASS_LEN:{len(PASSWORD)}", flush=True)
+        state["debug"] = f"V10 USER:{USER_ID} APP:{APP_ID} DOB:{DOB_YEAR} TOTP:{totp_now} SEC:{len(APP_SECRET)}"
+        if not USER_ID or not PASSWORD or not APP_SECRET or not APP_ID:
+            state["login"] = "NEED CREDENTIALS"
             return False
         from alice_blue import AliceBlue
-        if not hasattr(AliceBlue, "login_and_get_sessionID"):
-            state["login"] = f"Method Illa - {[m for m in dir(AliceBlue) if not m.startswith('_')]}"
-            return False
-        fn = getattr(AliceBlue, "login_and_get_sessionID")
+        fn = getattr(AliceBlue, "login_and_get_sessionID", None)
+        if not fn:
+            state["login"] = "Method Illa"; return False
         try: sig = str(inspect.signature(fn))
         except: sig = "?"
-        print(f"login_and_get_sessionID Sig: {sig}", flush=True)
-        state["debug"] += f" | Sig: {sig}"
+        state["debug"] += f" | Sig:{sig}"
+        # CORRECT ORDER - Sig: (username, password, twoFA, app_id, api_secret)
+        # Positional la Ippo Correct Order la Poduvom!
+        # twoFA ku 3 Option Try pannuvom: Birth Year, TOTP, Birth Year as String
+        twofa_options = []
+        if DOB_YEAR: twofa_options.append(("DOB_YEAR", DOB_YEAR))
+        if totp_now: twofa_options.append(("TOTP", totp_now))
+        if DOB_YEAR: twofa_options.append(("DOB_STR", str(DOB_YEAR)))
         token = None
         last_err = ""
-        # Correct Method - 4 Vazhila Try pannuvom - Edhu Work Aagudho Adhu
-        attempts = [
-            ("kwargs-username", {"username":USER_ID,"password":PASSWORD,"twoFA":DOB_YEAR,"api_secret":APP_SECRET,"app_id":APP_ID}),
-            ("kwargs-userId", {"userId":USER_ID,"password":PASSWORD,"twoFA":DOB_YEAR,"api_secret":APP_SECRET,"app_id":APP_ID}),
-            ("kwargs-2fa-small", {"username":USER_ID,"password":PASSWORD,"twofa":DOB_YEAR,"api_secret":APP_SECRET,"app_id":APP_ID}),
-            ("positional", None),
-        ]
-        for label, kwargs in attempts:
+        for tfa_label, tfa_val in twofa_options:
+            # 1. Positional Correct Order
             try:
-                print(f"TRY {label}", flush=True)
-                if kwargs is None:
-                    res = fn(USER_ID, PASSWORD, DOB_YEAR, APP_SECRET, APP_ID)
-                else:
-                    res = fn(**kwargs)
-                print(f"{label} Res:{str(res)[:600]} Type:{type(res)}", flush=True)
-                state["debug"] += f" | {label} Res:{str(res)[:200]}"
+                print(f"TRY Positional {tfa_label}={tfa_val} Order: USER,PASS,2FA,APP_ID,SECRET", flush=True)
+                res = fn(USER_ID, PASSWORD, tfa_val, APP_ID, APP_SECRET)
+                print(f"Positional {tfa_label} Res:{str(res)[:600]}", flush=True)
+                state["debug"] += f" | Pos-{tfa_label} Res:{str(res)[:200]}"
                 if res:
                     if isinstance(res, dict):
                         token = res.get("sessionId") or res.get("sessionID") or res.get("session_id") or res.get("access_token") or res.get("token")
-                        if not token:
-                            state["debug"] += f" | Dict Keys:{list(res.keys())}"
+                        if not token: state["debug"] += f" | Dict Keys:{list(res.keys())} Full:{str(res)[:300]}"
                     elif isinstance(res, str) and len(res)>10:
                         token = res
-                    elif hasattr(res, "sessionId"):
-                        token = getattr(res, "sessionId")
-                    elif hasattr(res, "session_id"):
-                        token = getattr(res, "session_id")
-                    else:
-                        s=str(res)
-                        if len(s)>10 and "{" not in s: token=s
                     if token and is_valid_key(str(token)) and len(str(token))>10:
-                        print(f"SUCCESS {label} Token:{str(token)[:20]}***", flush=True)
-                        break
-                    else:
-                        last_err = f"{label} Token Empty Res:{str(res)[:300]}"
-                else:
-                    last_err = f"{label} Res Empty"
+                        print(f"SUCCESS Positional {tfa_label}", flush=True); break
+                    else: last_err = f"Pos-{tfa_label} Empty Res:{str(res)[:300]}"
             except Exception as e:
                 last_err = str(e)
-                print(f"{label} Fail: {e}", flush=True)
-                state["debug"] += f" | {label} Fail:{str(e)[:200]}"
+                print(f"Positional {tfa_label} Fail:{e}", flush=True)
+                state["debug"] += f" | Pos-{tfa_label} Fail:{str(e)[:200]}"
+                # Empty JSON Error vandha - Next twoFA Try pannu - Illana Break panna Vendaam
                 continue
+            # 2. Kwargs Correct Names - app_id Munnadi, api_secret Apparam - Order Mukkiyam Illa Aana Correct-a Poduvom
+            try:
+                print(f"TRY Kwargs {tfa_label}", flush=True)
+                res2 = fn(username=USER_ID, password=PASSWORD, twoFA=tfa_val, app_id=APP_ID, api_secret=APP_SECRET)
+                print(f"Kwargs {tfa_label} Res:{str(res2)[:600]}", flush=True)
+                state["debug"] += f" | Kw-{tfa_label} Res:{str(res2)[:200]}"
+                if res2:
+                    if isinstance(res2, dict):
+                        token = res2.get("sessionId") or res2.get("sessionID") or res2.get("session_id") or res2.get("access_token")
+                    elif isinstance(res2, str) and len(res2)>10:
+                        token = res2
+                    if token and is_valid_key(str(token)) and len(str(token))>10:
+                        print(f"SUCCESS Kwargs {tfa_label}", flush=True); break
+            except Exception as e:
+                last_err = str(e)
+                print(f"Kwargs {tfa_label} Fail:{e}", flush=True)
+                state["debug"] += f" | Kw-{tfa_label} Fail:{str(e)[:200]}"
+                continue
+            if token: break
         if not token or not is_valid_key(str(token)):
-            state["login"] = f"SDK LOGIN FAIL - Sig:{sig} - Last:{last_err[:400]}"
+            state["login"] = f"SDK LOGIN FAIL - Sig:{sig} - Last:{last_err[:500]} - twoFA Check: DOB={DOB_YEAR} TOTP={totp_now} - Alice App la 2FA Enna nu Paaru"
             return False
         token = str(token).strip()
         session_id_global = token; real_session_global = token
         state["session_id"]=token[:12]+"***"; state["real_session"]=token[:12]+"***"
-        state["login"]=f"LIVE READY V9 - User {USER_ID[:3]}*** - LOT 65 - SESSIONID OK"
-        print(f"V9 SUCCESS Token:{token[:12]}***", flush=True)
+        state["login"]=f"LIVE READY V10 - User {USER_ID[:3]}*** - LOT 65 - SESSIONID OK"
+        print(f"V10 SUCCESS Token:{token[:12]}***", flush=True)
         return True
     except Exception as e:
         print(traceback.format_exc(), flush=True)
-        state["debug"]+=f" | V9 Fail:{str(e)[:500]}"
+        state["debug"]+=f" | V10 Fail:{str(e)[:500]}"
         state["login"]=f"SDK LOGIN FAIL - {str(e)[:300]}"
         return False
 
@@ -174,8 +190,8 @@ def place_trade(side, price, nifty_price):
                     state["reason"]="LIVE FAILED - No Session"; state["live_order"]="FAILED - No Session"; state["in_trade"]=False; return
             strike=round(float(nifty_price)/50)*50; qty=LOT_SIZE*LOTS
             code,body,url=place_order_direct_v2(strike,side,qty)
-            state["reason"]=f"LIVE ORDER V9 - NIFTY {strike} {side} x {LOTS} Lot (Qty {qty}) - Status:{code}"
-            state["live_order"]=f"V9 - URL:{url} Status:{code} Body:{body}"
+            state["reason"]=f"LIVE ORDER V10 - NIFTY {strike} {side} x {LOTS} Lot (Qty {qty}) - Status:{code}"
+            state["live_order"]=f"V10 - URL:{url} Status:{code} Body:{body}"
         except Exception as e:
             state["reason"]=f"LIVE ORDER FAILED:{e}"; state["live_order"]=f"FAILED:{e}"; print(traceback.format_exc(),flush=True)
 
@@ -216,13 +232,13 @@ except Exception as e: print(f"Thread Error:{e}",flush=True)
 @app.route('/')
 def home():
     return f"""
-    <h1>ALICE BOT - {state['mode']} - V9 SESSIONID</h1>
+    <h1>ALICE BOT - {state['mode']} - V10 CORRECT ORDER</h1>
     <p>Time: {state['last_update']}</p><p>Login: {state['login']} | Mode: <b>{state['mode']}</b> | Lot: <b>{LOT_SIZE}</b></p>
     <p>Signal: {state['signal']}</p><p>Candle1: {state['candle1']}</p><p>Candle2: {state['candle2']}</p>
     <p>In Trade: {state['in_trade']} Side: {state['side']} Entry: {state['entry']}</p><p>Reason: {state['reason']}</p><p>Live Order: {state['live_order']}</p><p>Test: {state['test_order_result']}</p><p>Session: {state['session_id']}</p>
     <hr><h3 style='color:red'>REAL TEST ORDER - 65 QTY</h3>
     <p><a href='/test-order-confirm' style='background:orange; padding:10px; color:black;'><b>TEST ORDER - NIFTY ATM CE - 65 QTY</b></a></p>
-    <hr><p><a href='/force-login'><b>/force-login - login_and_get_sessionID</b></a> | <a href='/test'>/test</a> | <a href='/status'>STATUS</a></p>
+    <hr><p><a href='/force-login'><b>/force-login</b></a> | <a href='/test'>/test - SDK Source Paaru</a> | <a href='/status'>STATUS</a></p>
     <hr><h3>DEBUG:</h3><p>{state['debug']}</p>
     <script>setTimeout(()=>location.reload(),10000)</script>
     """
@@ -230,12 +246,12 @@ def home():
 @app.route('/force-login')
 def force_login():
     ok=alice_login_v2()
-    return f"<h2>Force Login V9 - login_and_get_sessionID</h2><p>Result: {state['login']}</p><p>Debug: {state['debug']}</p><p><a href='/'>Home</a> | <a href='/test-order-confirm'>Test Order</a></p>"
+    return f"<h2>Force Login V10 - Correct Order (USER,PASS,2FA,APP_ID,SECRET)</h2><p>Result: {state['login']}</p><p>Debug: {state['debug']}</p><p>TOTP Now: {get_totp()} DOB: {DOB_YEAR} TOTP_SECRET_LEN:{len(TOTP_SECRET)}</p><p><a href='/'>Home</a> | <a href='/test-order-confirm'>Test Order</a></p>"
 
 @app.route('/test-order-confirm')
 def test_order_confirm():
     nifty=get_nifty_price(); strike=round(float(nifty)/50)*50 if nifty else 0
-    return f"""<h2>CONFIRM REAL TEST ORDER</h2><p>Login: {state['login']}</p><p>Nifty: {nifty}</p><p>Strike: {strike} CE - 65 Qty - MIS</p><p>Expected: Insufficient Funds - SUCCESS</p><hr><p><a href='/test-order-do' style='background:red; color:white; padding:15px 30px;'><b>YES - REAL TEST ORDER PODU - 65 QTY</b></a></p><br><br><p><a href='/'>NO</a></p>"""
+    return f"""<h2>CONFIRM REAL TEST ORDER</h2><p>Login: {state['login']}</p><p>Nifty: {nifty}</p><p>Strike: {strike} CE - 65 Qty</p><p>Expected: Insufficient Funds - SUCCESS</p><hr><p><a href='/test-order-do' style='background:red; color:white; padding:15px 30px;'><b>YES - REAL TEST ORDER PODU - 65 QTY</b></a></p><br><br><p><a href='/'>NO</a></p>"""
 
 @app.route('/test-order-do')
 def test_order_do():
@@ -251,32 +267,32 @@ def test_order_do():
     elif "401" in str(code) or "invalid" in bl: interp="<h3 style='color:red'>❌ FAIL - Session Problem</h3>"
     elif code==200: interp="<h3 style='color:green'>✅ ORDER PLACED!</h3>"
     else: interp=f"<h3>Status {code} - Screenshot Anuppunga</h3>"
-    return f"""<h2>REAL TEST ORDER RESULT - V9 - LOT 65</h2><p>Nifty:{nifty} Strike:{strike} CE Qty:{qty}</p><p>URL:{url}</p><p>Status:{code}</p><p>Body:{body}</p><hr>{interp}<hr><p><a href='/'>Home</a></p>"""
+    return f"""<h2>REAL TEST ORDER RESULT - V10 - LOT 65</h2><p>Nifty:{nifty} Strike:{strike} CE Qty:{qty}</p><p>URL:{url}</p><p>Status:{code}</p><p>Body:{body}</p><hr>{interp}<hr><p><a href='/'>Home</a></p>"""
 
 @app.route('/test')
 def test_encpkey():
-    out=[f"<p>USER:{USER_ID} APP:{APP_ID} SEC_LEN:{len(APP_SECRET)} 2FA:{DOB_YEAR} PASS_LEN:{len(PASSWORD)}</p>"]
+    out=[f"<p>USER:{USER_ID} APP:{APP_ID} SEC_LEN:{len(APP_SECRET)} DOB:{DOB_YEAR} TOTP_NOW:{get_totp()} TOTP_SECRET_LEN:{len(TOTP_SECRET)} PASS_LEN:{len(PASSWORD)}</p>"]
     try:
         from alice_blue import AliceBlue
         import inspect as ins
         fn=getattr(AliceBlue,"login_and_get_sessionID",None)
-        out.append(f"<p><b>login_and_get_sessionID Sig:</b> {ins.signature(fn) if fn else 'NOT FOUND'}</p>")
-        out.append(f"<p><b>Doc:</b> {ins.getdoc(fn)[:1500] if fn else ''}</p>")
+        out.append(f"<p><b>Sig:</b> {ins.signature(fn) if fn else 'NOT FOUND'}</p>")
+        out.append(f"<p><b>Doc:</b> {ins.getdoc(fn)[:2000] if fn else ''}</p>")
         try:
             src=ins.getsource(fn)
-            out.append(f"<p><b>Source:</b><pre>{src[:5000]}</pre></p>")
+            out.append(f"<p><b>Source Code - Idhula Hash / API Call Theriyum:</b><pre>{src[:6000]}</pre></p>")
         except Exception as e: out.append(f"<p>Source Err:{e}</p>")
     except Exception as e: out.append(f"<p style='color:red'>ERR:{e}</p>")
-    return "<h2>Test V9</h2>"+"".join(out)+"<br><a href='/'>Home</a> | <a href='/force-login'>Force Login</a>"
+    return "<h2>Test V10 - SDK Source</h2>"+"".join(out)+"<br><a href='/'>Home</a> | <a href='/force-login'>Force Login</a>"
 
 @app.route('/status')
 def status(): return jsonify(state)
 @app.route('/login')
 def login_redirect(): return redirect(f"https://ant.aliceblueonline.com/?appcode={APP_ID}")
 @app.route('/callback')
-def callback(): return f"<h2>V9 la authCode Thevai Illa</h2><p><a href='/force-login'>Force Login</a></p>"
+def callback(): return f"<h2>V10 la authCode Thevai Illa</h2><p><a href='/force-login'>Force Login</a></p>"
 @app.route('/setcode', methods=['GET','POST'])
-def setcode(): return f"""<h2>V9 - SDK Method</h2><p>Login: {state['login']}</p><p><a href='/force-login'>Force Login</a> | <a href='/'>Home</a></p>"""
+def setcode(): return f"""<h2>V10 - SDK Method</h2><p>Login: {state['login']}</p><p><a href='/force-login'>Force Login</a> | <a href='/'>Home</a></p>"""
 
 if __name__=='__main__':
     port=int(os.environ.get("PORT",10000)); print(f"Starting PORT {port} MODE {MODE}",flush=True); app.run(host='0.0.0.0', port=port)
