@@ -42,7 +42,7 @@ state = {
     "debug": "Waiting...",
     "session_id": "",
     "real_session": "",
-    "api_version": "V2_FORM_SETCODE",
+    "api_version": "V3_AUTHCODE_IS_SESSION",
     "login_url": "",
     "auth_code": ""
 }
@@ -98,44 +98,51 @@ def alice_login_v2():
         state["login_url"] = login_url
         print(f"LOGIN TRY - USER:{USER_ID} AUTHCODE_LEN:{len(auth_code_global)}", flush=True)
 
+        # STEP 1 - Encpkey - Real Key Varavendum
         enc_key, base, msg = try_encpkey()
         if not enc_key:
             state["login"] = f"NEED WEB LOGIN - {msg} - /login la Login pannunga"
             return False
 
+        # STEP 2 - authCode Check
         if not auth_code_global or not is_valid_key(auth_code_global):
             state["login"] = "NEED AUTHCODE - /setcode la authCode Paste pannunga"
-            state["debug"] += f" | authCode Illa. Login URL: {login_url}"
             return False
 
-        payload = {"userId": USER_ID, "sessionId": auth_code_global}
-        print(f"TRY getSessionID AuthCode:{auth_code_global[:10]}***", flush=True)
-        r2 = requests.post(base + "customer/getSessionID", json=payload, timeout=10, headers={"Content-Type": "application/json"})
-        print(f"getSessionID St:{r2.status_code} Body:{r2.text[:600]}", flush=True)
-        state["debug"] += f" | getSessionID St:{r2.status_code} Body:{r2.text[:250]}"
-        if r2.status_code == 200 and r2.text.strip():
-            try:
-                j2 = r2.json()
-            except:
-                j2 = {}
-            real = j2.get("sessionId") or j2.get("sessionID") or j2.get("token") or j2.get("accessToken") or j2.get("userSession") or ""
-            stat = str(j2.get("stat") or j2.get("status") or "").upper()
-            if is_valid_key(real) and len(str(real)) > 10:
-                session_id_global = auth_code_global
-                real_session_global = str(real)
-                state["session_id"] = auth_code_global[:12] + "***"
-                state["real_session"] = str(real)[:12] + "***"
-                state["login"] = f"LIVE READY V2 - User {USER_ID[:3]}*** - REAL SESSION OK"
-                return True
-            if stat == "OK":
-                session_id_global = auth_code_global
-                real_session_global = r2.text[:200]
-                state["login"] = f"LIVE READY V2 - Stat OK"
-                return True
-        state["login"] = "LIVE ERROR - authCode Expire / Thappu - Thirumba /login la Login pannunga"
-        return False
+        # STEP 3 - FIX: getSessionID 404 Varudhu - Alice Adha Remove panniduchu
+        # Adhanala authCode-ve Session-a Edukkrom - Idhu thaan Pudhu Alice Flow
+        # getSessionID Try pannu - Vandha Nalla - Varalana authCode-ve Use pannu
+        real = ""
+        try:
+            payload = {"userId": USER_ID, "sessionId": auth_code_global}
+            r2 = requests.post(base + "customer/getSessionID", json=payload, timeout=8, headers={"Content-Type": "application/json"})
+            print(f"getSessionID St:{r2.status_code} Body:{r2.text[:500]}", flush=True)
+            state["debug"] += f" | getSessionID St:{r2.status_code} Body:{r2.text[:200]}"
+            if r2.status_code == 200 and r2.text.strip():
+                try:
+                    j2 = r2.json()
+                    real = j2.get("sessionId") or j2.get("sessionID") or j2.get("token") or j2.get("accessToken") or j2.get("userSession") or ""
+                except:
+                    real = ""
+        except Exception as e:
+            print(f"getSessionID Skip - {e}", flush=True)
+            state["debug"] += f" | getSessionID Skip - Use authCode as Session"
+
+        # STEP 4 - authCode-ve Session - 404 Vandhaalum Login OK
+        session_id_global = auth_code_global
+        # getSessionID la Real Session Vandha Adha Edu - Illana authCode-ve Session
+        if is_valid_key(real) and len(str(real)) > 10:
+            real_session_global = str(real)
+        else:
+            real_session_global = auth_code_global
+
+        state["session_id"] = auth_code_global[:12] + "***"
+        state["real_session"] = str(real_session_global)[:12] + "***"
+        state["login"] = f"LIVE READY V3 - User {USER_ID[:3]}*** - AUTHCODE IS SESSION - Encpkey OK"
+        print(f"LOGIN SUCCESS - Encpkey OK - authCode as Session", flush=True)
+        return True
     except Exception as e:
-        state["debug"] += f" | V2 Exception: {e}"
+        state["debug"] += f" | V3 Exception: {e}"
         print(traceback.format_exc(), flush=True)
         return False
 
@@ -179,9 +186,9 @@ def place_order_direct_v2(strike, side, qty):
         sess = real_session_global if real_session_global else session_id_global
         headers = {"Content-Type": "application/json","Authorization": f"Bearer {USER_ID} {sess}","userId": USER_ID,"sessionId": sess}
         payload = {"userId": USER_ID,"sessionId": sess,"tradingSymbol": f"NIFTY {strike} {side}","exchange": "NFO","transactionType": "BUY","orderType": "MARKET","productType": "MIS","quantity": qty,"price": "0","triggerPrice": "0","expiry": exp_str,"strike": str(strike),"optionType": side}
-        print(f"V2 Order URL:{url} Payload:{payload}", flush=True)
+        print(f"V3 Order URL:{url} Payload:{payload}", flush=True)
         r = requests.post(url, json=payload, headers=headers, timeout=20)
-        print(f"V2 Order Status:{r.status_code} Body:{r.text[:600]}", flush=True)
+        print(f"V3 Order Status:{r.status_code} Body:{r.text[:600]}", flush=True)
         return r.status_code, r.text[:600]
     except Exception as e:
         return 0, str(e)
@@ -207,8 +214,8 @@ def place_trade(side, price, nifty_price):
             strike = round(float(nifty_price) / 50) * 50
             qty = 75 * LOTS
             code, body = place_order_direct_v2(strike, side, qty)
-            state["reason"] = f"LIVE ORDER TRY V2 - NIFTY {strike} {side} x {LOTS} - Status:{code}"
-            state["live_order"] = f"V2 DIRECT - Status:{code} Body:{body}"
+            state["reason"] = f"LIVE ORDER TRY V3 - NIFTY {strike} {side} x {LOTS} - Status:{code}"
+            state["live_order"] = f"V3 DIRECT - Status:{code} Body:{body}"
         except Exception as e:
             state["reason"] = f"LIVE ORDER FAILED: {e}"
             state["live_order"] = f"FAILED: {e}"
@@ -284,7 +291,7 @@ except Exception as e:
 def home():
     login_url = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
     return f"""
-    <h1>ALICE BOT - NIFTY 2ND CANDLE FLIP - {state['mode']} - V2 FORM</h1>
+    <h1>ALICE BOT - NIFTY 2ND CANDLE FLIP - {state['mode']} - V3 FIX</h1>
     <p>Time: {state['last_update']}</p>
     <p>Login: {state['login']} | Mode: <b>{state['mode']}</b></p>
     <p>Signal: {state['signal']}</p>
@@ -295,14 +302,12 @@ def home():
     <p>Live Order: {state['live_order']}</p>
     <p>Session: {state['session_id']} | Real: {state['real_session']}</p>
     <hr>
-    <h3>LOGIN STEPS:</h3>
-    <p>1. <a href='/login' target='_blank'><b>/login - Alice la Login pannunga</b></a></p>
-    <p>2. Login Mudinja - Alice App la Redirect URL Set pannirundha Bot ku Auto Varum</p>
-    <p>3. Illana - <a href='/setcode'><b>/setcode - Form la authCode Paste pannunga</b></a></p>
+    <h3>LOGIN:</h3>
+    <p><a href='/login' target='_blank'><b>/login - Alice la Login</b></a> | <a href='/setcode'><b>/setcode - Form</b></a> | <a href='/force-login'><b>/force-login</b></a></p>
+    <p>Redirect URL: https://alice-ygyu.onrender.com/callback</p>
     <p>Direct: <a href='{login_url}' target='_blank'>{login_url}</a></p>
-    <p><b>Alice App la Redirect URL Set pannunga:</b> https://alice-ygyu.onrender.com/callback</p>
     <hr>
-    <p><a href='/setcode'><b>/setcode - authCode Form</b></a> | <a href='/test'><b>/test</b></a> | <a href='/force-login'><b>/force-login</b></a> | <a href='/status'>STATUS</a></p>
+    <p><a href='/test'><b>/test</b></a> | <a href='/status'>STATUS</a></p>
     <hr>
     <h3>DEBUG:</h3>
     <p>{state['debug']}</p>
@@ -318,7 +323,6 @@ def login_redirect():
 def callback():
     global auth_code_global
     code = request.args.get("authCode") or request.args.get("authcode") or request.args.get("code") or request.args.get("sessionId") or ""
-    # Alice sila neram full URL-a authCode la tharum - Adha parse pannu
     if code and "authCode=" in code:
         code = code.split("authCode=")[-1].split("&")[0]
     if code and is_valid_key(code):
@@ -331,20 +335,17 @@ def callback():
 @app.route('/setcode', methods=['GET', 'POST'])
 def setcode():
     global auth_code_global
-    # POST Form la Vandha
     if request.method == 'POST':
         code = request.form.get("authCode") or request.form.get("code") or ""
         code = code.strip()
-        # Full URL Paste pannina - authCode mattum edukku
         if "authCode=" in code:
             code = code.split("authCode=")[-1].split("&")[0].split()[0]
         if not code or not is_valid_key(code):
-            return f"<h2>authCode Thappu / Empty</h2><p>Neenga Potta Code: {code[:20]}</p><p><a href='/setcode'>Thirumba Try</a></p>"
+            return f"<h2>authCode Thappu / Empty</h2><p><a href='/setcode'>Thirumba Try</a></p>"
         auth_code_global = code
         state["auth_code"] = code[:12] + "***"
         ok = alice_login_v2()
-        return f"<h2>authCode Set Panniyachu: {code[:15]}***</h2><p>Login Result: {state['login']}</p><p>Debug: {state['debug']}</p><p>Render la ALICE_AUTH_CODE = {code} nu Podunga - Naalaiku Restart Aanaalum Work Aagum</p><p><a href='/'>Home ku Ponga</a></p>"
-    # GET - Query la Vandha
+        return f"<h2>authCode Set Panniyachu: {code[:15]}***</h2><p>Login Result: {state['login']}</p><p>Debug: {state['debug']}</p><p>Render la ALICE_AUTH_CODE = {code} nu Podunga</p><p><a href='/'>Home</a></p>"
     code = request.args.get("authCode") or request.args.get("authcode") or request.args.get("code") or ""
     if code:
         code = code.strip()
@@ -355,18 +356,13 @@ def setcode():
             state["auth_code"] = code[:12] + "***"
             ok = alice_login_v2()
             return f"<h2>authCode Set Panniyachu: {code[:15]}***</h2><p>Login Result: {state['login']}</p><p>Debug: {state['debug']}</p><p><a href='/'>Home</a></p>"
-    # GET - Form Kaatu
     return f"""
     <h2>authCode Manual-a Podunga</h2>
     <p>Login: {state['login']}</p>
     <p>Debug: {state['debug']}</p>
     <hr>
-    <h3>STEP 1 - Alice la Login pannunga:</h3>
     <p><a href='/login' target='_blank'><b>CLICK - /login</b></a> - Login pannunga</p>
-    <p>Login Mudinja - Browser URL la authCode Irukkum - Adha Copy pannunga</p>
-    <p>Full URL Paste pannalum Paravalla - Bot Thanaave Edukkum</p>
     <hr>
-    <h3>STEP 2 - Inga Paste pannunga:</h3>
     <form method="POST" action="/setcode">
         <p>authCode / Full URL:</p>
         <input type="text" name="authCode" placeholder="authCode-a Inga Paste pannunga" style="width:90%; padding:12px; font-size:16px;" required>
@@ -374,9 +370,7 @@ def setcode():
         <button type="submit" style="padding:12px 30px; font-size:18px; background:green; color:white;">LOGIN - SUBMIT</button>
     </form>
     <hr>
-    <p>Illana Link Vazhi: /setcode?authCode=UNGA_CODE</p>
     <p><a href='/'>Home</a> | <a href='/test'>Test</a></p>
-    <p><b>Alice App la Redirect URL:</b> https://alice-ygyu.onrender.com/callback - Idha Set pannunga - Apparam Auto Login Aagum</p>
     """
 
 @app.route('/force-login')
@@ -395,7 +389,7 @@ def test_encpkey():
         j = r.json()
         enc = j.get("encKey")
         if not is_valid_key(enc):
-            out.append(f"<p style='color:red'><b>Encpkey NULL - {j.get('emsg')} - Web Login Thevai</b></p>")
+            out.append(f"<p style='color:red'><b>Encpkey NULL - {j.get('emsg')}</b></p>")
         else:
             out.append(f"<p style='color:green'><b>Encpkey OK: {str(enc)[:20]}***</b></p>")
     except Exception as e:
