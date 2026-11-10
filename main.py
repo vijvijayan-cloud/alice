@@ -20,12 +20,18 @@ APP_SECRET = clean("ALICE_APP_SECRET")
 STORE = {"session": None}
 
 BOT = {
-    "status": "STOPPED", "mode": "LIVE - ITM 1", "qty": 65,
+    "status": "STOPPED", "qty": 65,
     "high": None, "low": None, "candle_locked": False,
     "entry": None, "type": None, "strike": None, "sl": None,
     "ltp": None, "pnl": 0, "funds": 0, "funds_checked": False,
     "logs": [], "trade_done": False,
-    "expiry": "17NOV26", "alice_symbol": None, "spot": 25044.65, "atm": 25050
+    "expiry": "17NOV26", "alice_symbol": None, "spot": 25044.65, "atm": 25050,
+    # CRUDEOILM - Screenshot la Irukkuradhu!
+    "crude_symbol": "CRUDEOILM 17NOV26 8300 PE",
+    "crude_display": "CRUDEOILM 17TH NOV 8300 PE",
+    "crude_strike": 8300, "crude_type": "PE", "crude_qty": 10,
+    "crude_expiry": "17NOV26", "crude_buy_price": 490.00, "crude_sell_price": 502.95,
+    "crude_status": "READY", "crude_pnl": 0
 }
 
 def log(m):
@@ -34,20 +40,30 @@ def log(m):
     BOT["logs"] = BOT["logs"][:80]
     print(m, flush=True)
 
+# ---------- NIFTY ----------
 def get_alice_symbol(strike, opt_type):
     exp = "17NOV26"
     alice_sym = f"NIFTY {exp} {strike} {opt_type}"
-    display_sym = f"NIFTY 17TH NOV {strike} {opt_type}"
-    log(f"Symbol API:[{alice_sym}] Display:[{display_sym}]")
     BOT["alice_symbol"] = alice_sym
+    log(f"NIFTY Symbol: [{alice_sym}]")
     return alice_sym
+
+# ---------- CRUDEOILM ✅ - Screenshot Script! ----------
+def get_crude_symbol():
+    # Screenshot Display: CRUDEOILM 17TH NOV 8300 PE
+    # API Format: CRUDEOILM 17NOV26 8300 PE
+    api_sym = "CRUDEOILM 17NOV26 8300 PE"
+    display = "CRUDEOILM 17TH NOV 8300 PE"
+    log(f"CRUDE Symbol API:[{api_sym}] Display:[{display}] Qty:10 Lot:1 Exch:MCX")
+    BOT["crude_symbol"] = api_sym
+    return api_sym
 
 @app.route('/')
 def home():
     auth = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
     s = STORE.get("session")
     now = ist_now().strftime("%H:%M:%S IST - %d %b %Y")
-    return f"<h1>V83 - FULL FILE - DEPLOY FIX</h1><p>Time: {now}</p><p>Session: {'YES' if s else 'ILLA'}</p><p>Expiry: 17NOV26 FIXED | Spot: 25044.65 (Sample Page) | ATM: 25050 | ITM1 CE: 25000 CE | Lot: 65</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p>"
+    return f"<h1>V84 - NIFTY + CRUDEOILM - LIVE TRADE</h1><p>Time: {now} | Session: {'YES' if s else 'ILLA'}</p><p>NIFTY: 17NOV26 | 25000 CE | Lot 65</p><p>CRUDE: CRUDEOILM 17TH NOV 8300 PE | Lot 10 | MCX | LIMIT NRML</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p>"
 
 @app.route('/manual')
 def manual():
@@ -99,20 +115,24 @@ def get_funds():
 def get_ltp():
     return None
 
-def place_order_api(strike, opt_type, trans):
+# ---------- GENERIC ORDER - NIFTY + CRUDE Rendume! ----------
+def place_order_generic(symbol, exch, qty, trans, pcode, price_type, price=0):
     import requests
     sess = STORE.get("session")
     if not sess:
         log("Order Fail: Session Illa!")
         return {"error": "No Session"}
-    alice_sym = get_alice_symbol(strike, opt_type)
-    qty = 65
-    payload = {"userId": USER_ID, "exch": "NFO", "pCode": "MIS", "price": 0, "priceType": "MARKET", "qty": qty, "ret": "DAY", "tradingSymbol": alice_sym, "transType": trans, "trigPrice": 0, "orderTag": "VIJAYAN_ITM1", "complexity": "REGULAR", "discQty": 0}
+    payload = {
+        "userId": USER_ID, "exch": exch, "pCode": pcode,
+        "price": price, "priceType": price_type, "qty": qty, "ret": "DAY",
+        "tradingSymbol": symbol, "transType": trans,
+        "trigPrice": 0, "orderTag": "VIJAYAN_LIVE", "complexity": "REGULAR", "discQty": 0
+    }
     log(f"{trans} Payload: {payload}")
     h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json", "Accept": "application/json", "userId": USER_ID}
     try:
         r = requests.post("https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/placeOrder/executePlaceOrder", headers=h, json=payload, timeout=12)
-        log(f"{trans} ORDER [{alice_sym}] Qty:{qty} Status:{r.status_code} Resp:{r.text[:1000]}")
+        log(f"{trans} ORDER [{symbol}] Qty:{qty} Exch:{exch} Price:{price} Status:{r.status_code} Resp:{r.text[:1000]}")
         try:
             return r.json()
         except:
@@ -121,11 +141,26 @@ def place_order_api(strike, opt_type, trans):
         log(f"Order Err {e}")
         return {"error": str(e)}
 
-def place_buy(s, o):
-    return place_order_api(s, o, "BUY")
+def place_nifty(strike, opt_type, trans):
+    sym = get_alice_symbol(strike, opt_type)
+    return place_order_generic(sym, "NFO", 65, trans, "MIS", "MARKET", 0)
 
-def place_sell(s, o):
-    return place_order_api(s, o, "SELL")
+# ---------- CRUDE LIVE TRADE ✅ - Screenshot Maadhiri - LIMIT NRML! ----------
+def place_crude(trans, price):
+    sym = get_crude_symbol()
+    # Screenshot: MCX - LIMIT - NRML - Qty 1 Lot = 10
+    # BUY Price: Neenga Kodukkuradhu - SELL Price: Neenga Kodukkuradhu
+    # MARKET la Panna Koodadhu - LIMIT la thaan Pannanum - Illana Slippage!
+    res = place_order_generic(sym, "MCX", 10, trans, "NRML", "LIMIT", price)
+    if trans == "BUY":
+        BOT["crude_status"] = f"BOUGHT @ {price}"
+    else:
+        BOT["crude_status"] = f"SOLD @ {price}"
+        try:
+            BOT["crude_pnl"] = round((price - BOT["crude_buy_price"]) * 10, 2)
+        except:
+            pass
+    return res
 
 def bot_loop():
     while True:
@@ -145,12 +180,12 @@ def bot_loop():
                             BOT["high"] = ltp
                         if BOT["low"] is None or ltp < BOT["low"]:
                             BOT["low"] = ltp
-                        log(f"MARKING High:{BOT['high']} Low:{BOT['low']} Spot:{ltp}")
+                        log(f"NIFTY MARKING High:{BOT['high']} Low:{BOT['low']} Spot:{ltp}")
                     else:
-                        log("MARKING... Waiting for Live Price")
+                        log("NIFTY MARKING... Waiting for Live Price")
                 if now.hour == 9 and now.minute >= 20 and not BOT["candle_locked"] and BOT["high"]:
                     BOT["candle_locked"] = True
-                    log(f"CANDLE LOCKED High:{BOT['high']} Low:{BOT['low']}")
+                    log(f"NIFTY CANDLE LOCKED High:{BOT['high']} Low:{BOT['low']}")
                 if BOT["candle_locked"] and not BOT["trade_done"]:
                     ltp = get_ltp()
                     if ltp:
@@ -159,15 +194,15 @@ def bot_loop():
                             atm = int(round(ltp / 50) * 50)
                             strike = atm - 50
                             BOT["atm"] = atm
-                            log(f"BREAKOUT Spot {ltp} > High {BOT['high']} - ITM1 CE BUY {strike}CE")
-                            place_buy(strike, "CE")
+                            log(f"NIFTY BREAKOUT Spot {ltp} > High {BOT['high']} - ITM1 CE BUY {strike}CE")
+                            place_nifty(strike, "CE", "BUY")
                             BOT["entry"] = ltp; BOT["type"] = "CE"; BOT["strike"] = strike; BOT["sl"] = ltp - 30; BOT["trade_done"] = True
                         elif ltp < BOT["low"]:
                             atm = int(round(ltp / 50) * 50)
                             strike = atm + 50
                             BOT["atm"] = atm
-                            log(f"BREAKDOWN Spot {ltp} < Low {BOT['low']} - ITM1 PE BUY {strike}PE")
-                            place_buy(strike, "PE")
+                            log(f"NIFTY BREAKDOWN Spot {ltp} < Low {BOT['low']} - ITM1 PE BUY {strike}PE")
+                            place_nifty(strike, "PE", "BUY")
                             BOT["entry"] = ltp; BOT["type"] = "PE"; BOT["strike"] = strike; BOT["sl"] = ltp - 30; BOT["trade_done"] = True
                 if BOT["trade_done"] and BOT["entry"] and BOT["ltp"]:
                     profit = BOT["ltp"] - BOT["entry"]
@@ -178,11 +213,11 @@ def bot_loop():
                     BOT["pnl"] = round(profit * 65, 2)
                     if BOT["ltp"] <= BOT["sl"]:
                         log(f"SL HIT Exit @ {BOT['ltp']}")
-                        place_sell(BOT["strike"], BOT["type"])
+                        place_nifty(BOT["strike"], BOT["type"], "SELL")
                         BOT["status"] = "CLOSED"
                 if now.hour == 15 and now.minute >= 15 and BOT["trade_done"] and BOT["status"] == "RUNNING":
                     log("3:15 TIME EXIT")
-                    place_sell(BOT["strike"], BOT["type"])
+                    place_nifty(BOT["strike"], BOT["type"], "SELL")
                     BOT["status"] = "CLOSED"
             time.sleep(5)
         except Exception as e:
@@ -196,7 +231,24 @@ def dashboard():
     b = BOT
     logs = "<br>".join(b["logs"][:40])
     now_str = ist_now().strftime("%H:%M:%S IST - %d %b %Y")
-    return f"<h1>VIJAYAN ALGO - ITM 1 - V83</h1><p><b>Time:</b> {now_str} | <b>Funds:</b> Rs.{b['funds']} | <b>Status:</b> {b['status']} | <b>Expiry:</b> 17NOV26 | <b>Lot:</b> 65</p><p><b>Spot (Sample):</b> 25044.65 | <b>ATM:</b> 25050 | <b>Alice Symbol:</b> {b['alice_symbol']}</p><p><b>High:</b> {b['high']} | <b>Low:</b> {b['low']} | <b>Entry:</b> {b['entry']} | <b>Type:</b> {b['strike']} {b['type']} | <b>SL:</b> {b['sl']}</p><hr><p><a href='/bot/start'><button style='background:green;color:white;padding:12px'>START BOT</button></a> <a href='/bot/stop'><button style='background:red;color:white;padding:12px'>STOP</button></a> <a href='/bot/exit'><button style='background:orange;padding:12px'>EXIT ALL</button></a></p><p><a href='/bot/testcandle'><button style='background:blue;color:white;padding:12px'>TEST CANDLE</button></a> <a href='/bot/testorder'><button style='background:purple;color:white;padding:12px'>TEST ORDER - 25000 CE</button></a> <a href='/debug'><button style='padding:12px'>DEBUG</button></a></p><hr><h2>Logs</h2><p>{logs}</p><p><a href='/dashboard'>Refresh</a> | <a href='/'>Home</a></p>"
+    return f"""
+    <h1>VIJAYAN ALGO - NIFTY + CRUDEOILM - LIVE - V84</h1>
+    <p><b>Time:</b> {now_str} | <b>Funds:</b> Rs.{b['funds']} | <b>NIFTY Status:</b> {b['status']}</p>
+    <h2>1. NIFTY - ITM 1</h2>
+    <p><b>Expiry:</b> 17NOV26 | <b>Spot:</b> 25044.65 | <b>ATM:</b> 25050 | <b>Symbol:</b> {b['alice_symbol']} | <b>High:</b> {b['high']} | <b>Low:</b> {b['low']} | <b>Entry:</b> {b['entry']} | <b>Type:</b> {b['strike']} {b['type']} | <b>SL:</b> {b['sl']} | <b>PNL:</b> Rs.{b['pnl']}</p>
+    <p><a href='/bot/start'><button style='background:green;color:white;padding:12px'>START NIFTY BOT</button></a> <a href='/bot/stop'><button style='background:red;color:white;padding:12px'>STOP</button></a> <a href='/bot/exit'><button style='background:orange;padding:12px'>EXIT ALL</button></a></p>
+    <p><a href='/bot/testorder'><button style='background:purple;color:white;padding:12px'>TEST NIFTY - 25000 CE</button></a></p>
+    <hr>
+    <h2>2. CRUDEOILM - LIVE TRADE - Screenshot Script!</h2>
+    <p><b>Script:</b> {b['crude_display']} | <b>API:</b> {b['crude_symbol']} | <b>Strike:</b> 8300 PE | <b>Qty:</b> 10 (1 Lot) | <b>Exch:</b> MCX | <b>Type:</b> LIMIT NRML</p>
+    <p><b>Last Trade (Screenshot):</b> BUY 490.00 -> SELL 502.95 = Profit Rs.129.50 | <b>Crude Status:</b> {b['crude_status']} | <b>Crude PNL:</b> Rs.{b['crude_pnl']}</p>
+    <p><b>Manual Live Buttons - Price-a URL la Maathalam: /crude/buy?price=490 - /crude/sell?price=503</b></p>
+    <p><a href='/crude/buy?price=490'><button style='background:green;color:white;padding:14px'>🟢 CRUDE BUY 8300 PE @ 490 - LIVE</button></a>
+    <a href='/crude/sell?price=503'><button style='background:red;color:white;padding:14px'>🔴 CRUDE SELL 8300 PE @ 503 - LIVE</button></a></p>
+    <p><a href='/crude/buy?price=480'><button style='padding:10px'>BUY @ 480</button></a> <a href='/crude/buy?price=495'><button style='padding:10px'>BUY @ 495</button></a> <a href='/crude/sell?price=510'><button style='padding:10px'>SELL @ 510</button></a> <a href='/crude/sell?price=500'><button style='padding:10px'>SELL @ 500</button></a></p>
+    <hr><h2>Logs</h2><p>{logs}</p>
+    <p><a href='/dashboard'>Refresh</a> | <a href='/'>Home</a> | <a href='/debug'>Debug</a></p>
+    """
 
 @app.route('/bot/start')
 def start():
@@ -205,7 +257,7 @@ def start():
     BOT["trade_done"] = False; BOT["entry"] = None; BOT["pnl"] = 0
     BOT["funds"] = 0; BOT["funds_checked"] = False
     BOT["sl"] = None; BOT["ltp"] = None; BOT["strike"] = None; BOT["type"] = None
-    log("BOT STARTED")
+    log("NIFTY BOT STARTED")
     return redirect("/dashboard")
 
 @app.route('/bot/stop')
@@ -228,13 +280,6 @@ def exitall():
     BOT["status"] = "CLOSED"
     return redirect("/dashboard")
 
-@app.route('/bot/testcandle')
-def testcandle():
-    BOT["high"] = 25070; BOT["low"] = 25020; BOT["candle_locked"] = True; BOT["ltp"] = 25080
-    log("TEST - Spot 25080 - ATM 25100 - ITM1 CE = 25050 CE")
-    BOT["entry"] = 25080; BOT["type"] = "CE"; BOT["strike"] = 25050; BOT["sl"] = 25080 - 30; BOT["trade_done"] = True
-    return redirect("/dashboard")
-
 @app.route('/bot/testorder')
 def testorder():
     sess = STORE.get("session")
@@ -243,16 +288,53 @@ def testorder():
         return redirect("/dashboard")
     strike = int(request.args.get("strike", 25000))
     otype = request.args.get("type", "CE")
-    log(f"TEST ORDER - BUY {strike}{otype} - 1 Lot = 65 - Sample Page: 25000 CE LTP 256.05")
-    res = place_buy(strike, otype)
-    log(f"TEST ORDER Resp: {str(res)[:800]}")
+    log(f"TEST NIFTY - BUY {strike}{otype} - 1 Lot = 65")
+    res = place_nifty(strike, otype, "BUY")
+    log(f"TEST Resp: {str(res)[:800]}")
+    return redirect("/dashboard")
+
+# ---------- CRUDE LIVE ROUTES ✅ ----------
+@app.route('/crude/buy')
+def crude_buy():
+    sess = STORE.get("session")
+    if not sess:
+        log("CRUDE BUY Fail: LOGIN pannunga!")
+        return redirect("/dashboard")
+    try:
+        price = float(request.args.get("price", 490))
+    except:
+        price = 490
+    BOT["crude_buy_price"] = price
+    log(f"🟢 CRUDE LIVE BUY - {BOT['crude_display']} - Qty 10 - LIMIT {price} - MCX NRML - Screenshot Maadhiri!")
+    res = place_crude("BUY", price)
+    log(f"CRUDE BUY Resp: {str(res)[:800]}")
+    return redirect("/dashboard")
+
+@app.route('/crude/sell')
+def crude_sell():
+    sess = STORE.get("session")
+    if not sess:
+        log("CRUDE SELL Fail: LOGIN pannunga!")
+        return redirect("/dashboard")
+    try:
+        price = float(request.args.get("price", 503))
+    except:
+        price = 503
+    # Safety - 316 Maadhiri Thappa Price Poda Koodadhu!
+    if price < 400:
+        log(f"⚠️ CRUDE SELL BLOCKED! Price {price} - Romma Kammi! - 316 la Rejected Aana Maadhiri Aayidum! - 400-ku Mela Podunga!")
+        return redirect("/dashboard")
+    BOT["crude_sell_price"] = price
+    log(f"🔴 CRUDE LIVE SELL - {BOT['crude_display']} - Qty 10 - LIMIT {price} - MCX NRML")
+    res = place_crude("SELL", price)
+    log(f"CRUDE SELL Resp: {str(res)[:800]}")
     return redirect("/dashboard")
 
 @app.route('/debug')
 def debug():
     import requests
     sess = STORE.get("session")
-    out = [f"<h1>DEBUG</h1><p>IST: {ist_now().strftime('%H:%M:%S IST - %d %b %Y')}</p><p>Session: {'YES' if sess else 'ILLA - LOGIN pannunga!'}</p><p>Expiry: 17NOV26 | Spot Sample: 25044.65 | Lot: 65</p>"]
+    out = [f"<h1>DEBUG</h1><p>IST: {ist_now().strftime('%H:%M:%S IST - %d %b %Y')}</p><p>Session: {'YES' if sess else 'ILLA'}</p><p>NIFTY: 17NOV26 25000 CE | CRUDE: CRUDEOILM 17NOV26 8300 PE | Qty 10 | MCX LIMIT NRML</p>"]
     if sess:
         h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
         try:
