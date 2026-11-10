@@ -2,161 +2,210 @@ import os, hashlib, json, threading, time, math
 from flask import Flask, request, redirect
 from datetime import datetime
 app = Flask(__name__)
-def clean(n): return os.getenv(n,"").strip().replace('"',"").replace("'","")
-USER_ID=clean("ALICE_USER_ID"); APP_ID=clean("ALICE_APP_ID"); APP_SECRET=clean("ALICE_APP_SECRET")
-STORE={"session":None}
-BOT={
- "status":"STOPPED","mode":"LIVE - FULLY AUTO","symbol":"NIFTY","qty":65,
- "high":None,"low":None,"candle_locked":False,
- "entry":None,"type":None,"strike":None,"sl":None,"ltp":None,"pnl":0,
- "funds":0,"order_id":None,"logs":[],"trade_done":False
-}
-def log(m):
-    t=datetime.now().strftime("%H:%M:%S")
-    BOT["logs"].insert(0,f"[{t}] {m}"); BOT["logs"]=BOT["logs"][:60]; print(m)
 
+def clean(n):
+    return os.getenv(n, "").strip().replace('"', "").replace("'", "")
+USER_ID = clean("ALICE_USER_ID")
+APP_ID = clean("ALICE_APP_ID")
+APP_SECRET = clean("ALICE_APP_SECRET")
+STORE = {"session": None}
+
+BOT = {
+    "status": "STOPPED",
+    "mode": "LIVE - FULLY AUTO",
+    "symbol": "NIFTY",
+    "qty": 65,
+    "high": None,
+    "low": None,
+    "candle_locked": False,
+    "entry": None,
+    "type": None,
+    "strike": None,
+    "sl": None,
+    "ltp": None,
+    "pnl": 0,
+    "funds": 0,
+    "funds_checked": False,
+    "order_id": None,
+    "logs": [],
+    "trade_done": False
+}
+
+def log(m):
+    t = datetime.now().strftime("%H:%M:%S")
+    BOT["logs"].insert(0, f"[{t}] {m}")
+    BOT["logs"] = BOT["logs"][:60]
+    print(m)
+
+# ---------- HOME / LOGIN ----------
 @app.route('/')
 def home():
-    auth=f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
-    s=STORE.get("session")
-    return f"<h1>V61 - FULLY AUTO BOT</h1><p>Session:{'YES' if s else 'ILLA'}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><b>Morning LOGIN pannitu - START BOT pannunga - Appuram Bot thana paathukkum!</b></p>"
+    auth = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
+    s = STORE.get("session")
+    return f"<h1>V62 - FULLY AUTO BOT</h1><p>Session: {'YES' if s else 'ILLA'}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Morning LOGIN pannitu - START BOT pannunga - Appuram Bot thana paathukkum!</b></p>"
+
 @app.route('/manual')
-def manual(): return """<h1>AuthCode</h1><form action='/exchange'><input name='authCode' placeholder='AuthCode' style='width:320px'><button>EXCHANGE</button></form><br><a href='/'>Home</a>"""
+def manual():
+    return """<h1>AuthCode</h1><form action='/exchange'><input name='authCode' placeholder='AuthCode' style='width:320px'><button>EXCHANGE</button></form><br><a href='/'>Home</a>"""
+
 @app.route('/callback')
 def callback():
-    c=request.args.get("authCode") or request.args.get("code")
-    return redirect(f"/exchange?authCode={c}") if c else "No Code"
+    c = request.args.get("authCode") or request.args.get("code")
+    return redirect(f"/exchange?authCode={c}") if c else "No Code <a href='/'>Home</a>"
+
 @app.route('/exchange')
 def exchange():
     import requests
-    code=request.args.get("authCode","").strip()
+    code = request.args.get("authCode", "").strip()
+    if not code:
+        return "<h1>AuthCode Illa</h1><a href='/'>Home</a>"
     try:
-        REST="https://ant.aliceblueonline.com/rest/AliceBlueAPIService"
-        cs=hashlib.sha256(f"{USER_ID}{code}{APP_SECRET}".encode()).hexdigest()
-        r=requests.post(f"{REST}/sso/getUserDetails", json={"checkSum":cs,"userId":USER_ID}, timeout=10)
-        sess=r.json().get("userSession")
+        REST = "https://ant.aliceblueonline.com/rest/AliceBlueAPIService"
+        cs = hashlib.sha256(f"{USER_ID}{code}{APP_SECRET}".encode()).hexdigest()
+        r = requests.post(f"{REST}/sso/getUserDetails", json={"checkSum": cs, "userId": USER_ID}, timeout=10)
+        sess = r.json().get("userSession")
         if sess:
-            STORE["session"]=str(sess)
+            STORE["session"] = str(sess)
             return "<h2 style='color:green'>SUCCESS!</h2><p><a href='/dashboard'><b>DASHBOARD - START BOT</b></a></p>"
-        return f"Session Illa {r.text[:400]}"
-    except Exception as e: return f"Err {e}"
+        return f"Session Illa {r.text[:400]} <a href='/'>Home</a>"
+    except Exception as e:
+        return f"Err {e} <a href='/'>Home</a>"
 
-def get_ltp():
-    # NIFTY Spot LTP - AliceBlue Quote try pannrom
-    import requests
-    sess=STORE.get("session")
-    if not sess: return None
-    try:
-        h={"Authorization":f"Bearer {sess}","Content-Type":"application/json"}
-        # Try 1 - AliceBlue Quote
-        r=requests.get("https://ant.aliceblueonline.com/open-api/od/v1/quotes", headers=h, params={"userId":USER_ID}, timeout=5)
-        # Response la LTP irundha edukkanum - Ippo log mattum
-        # TODO: Real Quote format vandha - Inga parse pannanum
-        return None
-    except: return None
-
+# ---------- API HELPERS ----------
 def get_funds():
     import requests
-    sess=STORE.get("session")
-    if not sess: return 0
+    sess = STORE.get("session")
+    if not sess:
+        log("Funds Fail: Session Illa - LOGIN pannunga!")
+        return -1
     try:
-        h={"Authorization":f"Bearer {sess}","Content-Type":"application/json"}
-        r=requests.get("https://ant.aliceblueonline.com/open-api/od/v1/limits", headers=h, params={"userId":USER_ID}, timeout=7)
-        return float(r.json().get("result",{}).get("tradingLimit",0))
-    except: return 0
+        h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
+        r = requests.get("https://ant.aliceblueonline.com/open-api/od/v1/limits", headers=h, params={"userId": USER_ID}, timeout=7)
+        j = r.json()
+        log(f"Funds Raw: {str(j)[:200]}")
+        return float(j.get("result", {}).get("tradingLimit", 0))
+    except Exception as e:
+        log(f"Funds Err: {e}")
+        return -1
+
+def get_ltp():
+    import requests
+    sess = STORE.get("session")
+    if not sess:
+        return None
+    try:
+        h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
+        r = requests.get("https://ant.aliceblueonline.com/open-api/od/v1/quotes", headers=h, params={"userId": USER_ID}, timeout=5)
+        return None
+    except:
+        return None
 
 def place_buy(strike, opt_type):
     import requests
-    sess=STORE.get("session")
-    h={"Authorization":f"Bearer {sess}","Content-Type":"application/json"}
-    payload={"userId":USER_ID,"exchange":"NFO","tradingSymbol":f"NIFTY{strike}{opt_type}","quantity":65,"transactionType":"BUY","orderType":"MARKET","productType":"INTRADAY","validity":"DAY","price":"0","triggerPrice":"0","disclosedQuantity":"0"}
+    sess = STORE.get("session")
+    if not sess:
+        return {"error": "No Session"}
+    h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
+    payload = {"userId": USER_ID, "exchange": "NFO", "tradingSymbol": f"NIFTY{strike}{opt_type}", "quantity": 65, "transactionType": "BUY", "orderType": "MARKET", "productType": "INTRADAY", "validity": "DAY", "price": "0", "triggerPrice": "0", "disclosedQuantity": "0"}
     try:
-        r=requests.post("https://ant.aliceblueonline.com/open-api/od/v1/orders/place", headers=h, json=payload, timeout=10)
+        r = requests.post("https://ant.aliceblueonline.com/open-api/od/v1/orders/place", headers=h, json=payload, timeout=10)
         log(f"BUY ORDER {strike}{opt_type} Resp:{r.text[:400]}")
         return r.json()
     except Exception as e:
-        log(f"Order Err {e}"); return {"error":str(e)}
+        log(f"Order Err {e}")
+        return {"error": str(e)}
 
 def place_sell(strike, opt_type):
     import requests
-    sess=STORE.get("session")
-    h={"Authorization":f"Bearer {sess}","Content-Type":"application/json"}
-    payload={"userId":USER_ID,"exchange":"NFO","tradingSymbol":f"NIFTY{strike}{opt_type}","quantity":65,"transactionType":"SELL","orderType":"MARKET","productType":"INTRADAY","validity":"DAY","price":"0","triggerPrice":"0","disclosedQuantity":"0"}
+    sess = STORE.get("session")
+    if not sess:
+        return {"error": "No Session"}
+    h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
+    payload = {"userId": USER_ID, "exchange": "NFO", "tradingSymbol": f"NIFTY{strike}{opt_type}", "quantity": 65, "transactionType": "SELL", "orderType": "MARKET", "productType": "INTRADAY", "validity": "DAY", "price": "0", "triggerPrice": "0", "disclosedQuantity": "0"}
     try:
-        r=requests.post("https://ant.aliceblueonline.com/open-api/od/v1/orders/place", headers=h, json=payload, timeout=10)
+        r = requests.post("https://ant.aliceblueonline.com/open-api/od/v1/orders/place", headers=h, json=payload, timeout=10)
         log(f"SELL ORDER {strike}{opt_type} Resp:{r.text[:400]}")
         return r.json()
     except Exception as e:
-        log(f"Sell Err {e}"); return {"error":str(e)}
+        log(f"Sell Err {e}")
+        return {"error": str(e)}
 
+# ---------- BOT LOOP - FULLY AUTO ----------
 def bot_loop():
     while True:
         try:
-            if BOT["status"]=="RUNNING":
-                now=datetime.now()
-                # 1. FUNDS CHECK - Daily 1 Time
-                if BOT["funds"]==0:
-                    BOT["funds"]=get_funds(); log(f"Funds: Rs.{BOT['funds']}")
+            if BOT["status"] == "RUNNING":
+                now = datetime.now()
+                # 1. FUNDS - 1 Time mattum
+                if not BOT.get("funds_checked"):
+                    f = get_funds()
+                    BOT["funds_checked"] = True
+                    if f == -1:
+                        log("Session Expire - Re-LOGIN pannunga!")
+                        BOT["funds"] = 0
+                    else:
+                        BOT["funds"] = f
+                        log(f"Funds: Rs.{BOT['funds']}")
                 # 2. 9:15 - 9:20 - AUTO MARK FIRST CANDLE
-                if now.hour==9 and 15 <= now.minute < 20 and not BOT["candle_locked"]:
-                    # Live LTP - Real la - Websocket / Quote la irundhu varum
-                    # Ippo - get_ltp() la irundhu - Illa na - Log mattum
-                    ltp=get_ltp()
+                if now.hour == 9 and 15 <= now.minute < 20 and not BOT["candle_locked"]:
+                    ltp = get_ltp()
                     if ltp:
-                        BOT["ltp"]=ltp
-                        if BOT["high"] is None or ltp > BOT["high"]: BOT["high"]=ltp
-                        if BOT["low"] is None or ltp < BOT["low"]: BOT["low"]=ltp
+                        BOT["ltp"] = ltp
+                        if BOT["high"] is None or ltp > BOT["high"]:
+                            BOT["high"] = ltp
+                        if BOT["low"] is None or ltp < BOT["low"]:
+                            BOT["low"] = ltp
                         log(f"MARKING... High:{BOT['high']} Low:{BOT['low']} LTP:{ltp}")
                     else:
                         log("MARKING... Waiting for Live Price - Quote Connect Pannanum")
                 # 3. 9:20 - LOCK CANDLE
-                if now.hour==9 and now.minute>=20 and not BOT["candle_locked"] and BOT["high"]:
-                    BOT["candle_locked"]=True
+                if now.hour == 9 and now.minute >= 20 and not BOT["candle_locked"] and BOT["high"]:
+                    BOT["candle_locked"] = True
                     log(f"CANDLE LOCKED ✅ High:{BOT['high']} Low:{BOT['low']} - Waiting for Breakout...")
                 # 4. BREAKOUT CHECK - 9:20 to 3:15
-                if BOT["candle_locked"] and not BOT["trade_done"] and now.hour>=9:
-                    ltp=get_ltp()
+                if BOT["candle_locked"] and not BOT["trade_done"]:
+                    ltp = get_ltp()
                     if ltp:
-                        BOT["ltp"]=ltp
+                        BOT["ltp"] = ltp
                         if ltp > BOT["high"]:
-                            # CE BUY - ATM Strike
-                            strike=int(round(ltp/50)*50)
+                            strike = int(round(ltp / 50) * 50)
                             log(f"🚀 BREAKOUT! LTP {ltp} > High {BOT['high']} - CE BUY {strike}CE")
-                            res=place_buy(strike,"CE")
-                            BOT["entry"]=ltp; BOT["type"]="CE"; BOT["strike"]=strike; BOT["sl"]=ltp-30; BOT["trade_done"]=True
+                            res = place_buy(strike, "CE")
+                            BOT["entry"] = ltp; BOT["type"] = "CE"; BOT["strike"] = strike; BOT["sl"] = ltp - 30; BOT["trade_done"] = True
                         elif ltp < BOT["low"]:
-                            strike=int(round(ltp/50)*50)
+                            strike = int(round(ltp / 50) * 50)
                             log(f"🔻 BREAKDOWN! LTP {ltp} < Low {BOT['low']} - PE BUY {strike}PE")
-                            res=place_buy(strike,"PE")
-                            BOT["entry"]=ltp; BOT["type"]="PE"; BOT["strike"]=strike; BOT["sl"]=ltp-30; BOT["trade_done"]=True
+                            res = place_buy(strike, "PE")
+                            BOT["entry"] = ltp; BOT["type"] = "PE"; BOT["strike"] = strike; BOT["sl"] = ltp - 30; BOT["trade_done"] = True
                 # 5. TRAILING SL - 1 Point ku 1 Point
                 if BOT["trade_done"] and BOT["entry"] and BOT["ltp"]:
-                    profit=BOT["ltp"]-BOT["entry"]
-                    # NIFTY Spot ku - Option Price ku - Approx - Spot Profit = Option Profit nu vachikalam
-                    # Real la - Option LTP vachu Trailing pannanum
-                    new_sl=BOT["entry"]-30+profit
+                    profit = BOT["ltp"] - BOT["entry"]
+                    new_sl = BOT["entry"] - 30 + profit
                     if new_sl > BOT["sl"]:
-                        BOT["sl"]=round(new_sl,2); log(f"Trailing SL Moved -> {BOT['sl']} Profit:{profit:.2f}")
-                    BOT["pnl"]=round(profit*65,2)
-                    # SL HIT - AUTO EXIT
+                        BOT["sl"] = round(new_sl, 2)
+                        log(f"Trailing SL Moved -> {BOT['sl']} Profit:{profit:.2f}")
+                    BOT["pnl"] = round(profit * 65, 2)
                     if BOT["ltp"] <= BOT["sl"]:
                         log(f"🛑 SL HIT! Auto Exit @ {BOT['ltp']}")
                         place_sell(BOT["strike"], BOT["type"])
-                        BOT["status"]="CLOSED"
-                # 6. 3:15 - TIME EXIT - AUTO SQUARE OFF
-                if now.hour==15 and now.minute>=15 and BOT["trade_done"] and BOT["status"]=="RUNNING":
+                        BOT["status"] = "CLOSED"
+                # 6. 3:15 - TIME EXIT
+                if now.hour == 15 and now.minute >= 15 and BOT["trade_done"] and BOT["status"] == "RUNNING":
                     log("⏰ 3:15 TIME EXIT - Auto Square Off!")
                     place_sell(BOT["strike"], BOT["type"])
-                    BOT["status"]="CLOSED"
+                    BOT["status"] = "CLOSED"
             time.sleep(5)
         except Exception as e:
-            log(f"Bot Err {e}"); time.sleep(5)
+            log(f"Bot Err {e}")
+            time.sleep(5)
+
 threading.Thread(target=bot_loop, daemon=True).start()
 
+# ---------- DASHBOARD ----------
 @app.route('/dashboard')
 def dashboard():
-    b=BOT
-    logs="<br>".join(b["logs"][:25])
+    b = BOT
+    logs = "<br>".join(b["logs"][:25])
     return f"""
     <h1>VIJAYAN ALGO - FULLY AUTO - NIFTY MOMENTUM</h1>
     <p><b>Funds:</b> Rs.{b['funds']} | <b>Mode:</b> {b['mode']} | <b>Status:</b> {b['status']}</p>
@@ -169,26 +218,65 @@ def dashboard():
     <hr><p><a href='/bot/start'><button style='background:green;color:white;padding:12px'>▶️ START BOT - FULLY AUTO</button></a>
     <a href='/bot/stop'><button style='background:red;color:white;padding:12px'>⏹️ STOP BOT</button></a>
     <a href='/bot/exit'><button style='background:orange;padding:12px'>🚪 EXIT ALL</button></a></p>
+    <p><a href='/bot/testcandle'><button style='background:blue;color:white;padding:12px'>🧪 TEST MODE - Fake Candle Test - Evening la Test Pannalam!</button></a>
+    <a href='/debug'><button style='padding:12px'>🔍 DEBUG - Session / Funds Check</button></a></p>
     <hr><h2>Logs - Bot Enna Pannudhu?</h2><p>{logs}</p>
     <p><a href='/dashboard'>🔄 Refresh</a> | <a href='/'>Home</a></p>
     """
+
 @app.route('/bot/start')
 def start():
-    BOT["status"]="RUNNING"; BOT["high"]=None; BOT["low"]=None; BOT["candle_locked"]=False; BOT["trade_done"]=False; BOT["entry"]=None; BOT["pnl"]=0; BOT["funds"]=0
+    BOT["status"] = "RUNNING"
+    BOT["high"] = None; BOT["low"] = None; BOT["candle_locked"] = False
+    BOT["trade_done"] = False; BOT["entry"] = None; BOT["pnl"] = 0
+    BOT["funds"] = 0; BOT["funds_checked"] = False
+    BOT["sl"] = None; BOT["ltp"] = None; BOT["strike"] = None; BOT["type"] = None
     log("BOT STARTED - FULLY AUTO - Morning 9:15 la Mark pannum!")
     return redirect("/dashboard")
+
 @app.route('/bot/stop')
-def stop(): BOT["status"]="STOPPED"; log("BOT STOPPED"); return redirect("/dashboard")
+def stop():
+    BOT["status"] = "STOPPED"
+    log("BOT STOPPED")
+    return redirect("/dashboard")
+
 @app.route('/bot/exit')
 def exitall():
     import requests
-    sess=STORE.get("session")
+    sess = STORE.get("session")
     if sess:
-        h={"Authorization":f"Bearer {sess}","Content-Type":"application/json"}
+        h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
         try:
-            r=requests.post("https://ant.aliceblueonline.com/open-api/od/v1/orders/positions/sqroff", headers=h, json={"userId":USER_ID}, timeout=8)
+            r = requests.post("https://ant.aliceblueonline.com/open-api/od/v1/orders/positions/sqroff", headers=h, json={"userId": USER_ID}, timeout=8)
             log(f"EXIT ALL: {r.text[:200]}")
-        except Exception as e: log(f"Exit Err {e}")
-    BOT["status"]="CLOSED"; return redirect("/dashboard")
-if __name__=='__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
+        except Exception as e:
+            log(f"Exit Err {e}")
+    BOT["status"] = "CLOSED"
+    return redirect("/dashboard")
+
+@app.route('/bot/testcandle')
+def testcandle():
+    BOT["high"] = 24510; BOT["low"] = 24460; BOT["candle_locked"] = True; BOT["ltp"] = 24520
+    log("🧪 TEST MODE - Fake Candle Set High:24510 Low:24460 LTP:24520 - Breakout Test!")
+    log("🧪 TEST: LTP 24520 > High 24510 - CE BUY Trigger aaganum - Test mattum - Real Order Pogadhu!")
+    BOT["entry"] = 24520; BOT["type"] = "CE"; BOT["strike"] = 24500; BOT["sl"] = 24520 - 30; BOT["trade_done"] = True
+    log(f"🧪 TEST ENTRY CE 24500 @ 24520 SL:{BOT['sl']} - Trailing Test Ready!")
+    return redirect("/dashboard")
+
+@app.route('/debug')
+def debug():
+    import requests
+    sess = STORE.get("session")
+    out = [f"<h1>DEBUG</h1><p>Session: {'YES - ' + sess[:20] + '...' if sess else 'ILLA - LOGIN pannunga!'}</p>"]
+    if sess:
+        h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
+        try:
+            r = requests.get("https://ant.aliceblueonline.com/open-api/od/v1/limits", headers=h, params={"userId": USER_ID}, timeout=7)
+            out.append(f"<p><b>Limits Status:</b> {r.status_code}</p><p><b>Raw:</b> {r.text[:600]}</p>")
+        except Exception as e:
+            out.append(f"<p>Err {e}</p>")
+    out.append("<p><a href='/dashboard'>Dashboard</a> | <a href='/'>Home</a></p>")
+    return "<br>".join(out)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
