@@ -1,5 +1,5 @@
-import os, traceback, inspect
-from flask import Flask, request
+import os, traceback, inspect, json
+from flask import Flask
 app = Flask(__name__)
 def clean(n):
     return os.getenv(n,"").strip().replace('"',"").replace("'","")
@@ -9,81 +9,86 @@ APP_ID=clean("ALICE_APP_ID")
 APP_SECRET=clean("ALICE_APP_SECRET")
 DOB_YEAR=clean("ALICE_YEAR") or clean("ALICE_DOB_YEAR") or clean("ALICE_2FA")
 TOTP_SECRET=clean("ALICE_TOTP_SECRET")
-HOST="https://ant.aliceblueonline.com/rest/AliceBlueAPIService"
-CANDIDATES=[
-  "sso/validAnswer",
-  "sso/validateAnswer",
-  "sso/validUserDetails",
-  "sso/verifyAnswer",
-  "sso/checkAnswer",
-  "customer/validAnswer",
-  "customer/validateAnswer",
-  "customer/validUserDetails",
-  "sso/validate2FA",
-  "sso/verify2FA",
-  "customer/verifyAnswer",
-  "sso/validanswer",
+# Pudhu HOST candidates - Ella host-um try pannuvom
+HOSTS=[
+  "https://ant.aliceblueonline.com/rest/AliceBlueAPIService",
+  "https://ant.aliceblueonline.com",
+  "https://ant.aliceblueonline.com/rest",
+  "https://api.aliceblueonline.com",
+  "https://ant.aliceblueonline.com/api",
+  "https://a3.aliceblueonline.com/rest/AliceBlueAPIService",
+  "https://ant.aliceblueonline.com/rest/AliceBlueAPI",
+]
+PATHS=[
+  "sso/validAnswer","sso/validateAnswer","sso/validUserDetails",
+  "customer/validAnswer","customer/validateAnswer",
+  "sso/verifyAnswer","sso/validate2FA","sso/verify2FA",
+  "sso/validanswer","sso/ValidAnswer",
+  "sso/validAnswer/",
+  "AliceBlueAPIService/sso/validAnswer",
 ]
 @app.route('/')
 def home():
-    h=f"<h1>V38 - FAST - Oru Click Oru URL</h1><p>User:{USER_ID} DOB:{DOB_YEAR}</p>"
-    h+="<p><a href='/probe'><b>STEP 1: PROBE ALL - Edhu 404 Illa nu Paaru (FAST 10 sec)</b></a></p>"
-    h+="<h3>STEP 2: Oru Oru URL-a Click Pannu - Login Try Pannu:</h3>"
-    for i,c in enumerate(CANDIDATES):
-        h+=f"<p><a href='/try/{i}'><b>{i+1}. LOGIN via {c}</b></a></p>"
-    return h
-@app.route('/probe')
-def probe():
-    import requests
-    out=["<h1>PROBE - Edha URL 404 Illa?</h1>"]
-    for c in CANDIDATES:
-        full=f"{HOST}/{c}"
-        try:
-            # Dummy POST - Status mattum paakkanum - 404-a illa 200/400/500-a nu
-            r=requests.post(full, json={"userId":USER_ID,"answer":DOB_YEAR}, timeout=8)
-            body=(r.text or "")[:250].replace("<","&lt;")
-            flag="✅ 404 ILLA - Idhu Correct-a Irukkalam!" if r.status_code!=404 else "❌ 404"
-            out.append(f"<p><b>{c}</b> Status:{r.status_code} {flag}<br>Body:{body}</p>")
-        except Exception as e:
-            out.append(f"<p><b>{c}</b> Err:{e}</p>")
-    out.append("<p><b>404 ILLA nu vandha URL thaan correct URL! Adha /try la click pannu!</b></p><a href='/'>Home</a>")
-    return "<br>".join(out)
-@app.route('/try/<int:idx>')
-def try_one(idx):
-    out=[]
+    return f"<h1>V39 - FIND NEW HOST</h1><p>User:{USER_ID} DOB:{DOB_YEAR}</p><p><a href='/probe2'><b>1. PROBE HOST x PATH - 84 Try (FAST)</b></a></p><p><a href='/weblogin'><b>2. WEBLOGIN FULL RESPONSE - Pudhu URL Irukka Paaru</b></a></p><p><a href='/sdkurls'><b>3. SDK FULL URLs</b></a></p>"
+@app.route('/sdkurls')
+def sdkurls():
+    out=["<h1>SDK FULL URLs + SOURCE</h1>"]
     try:
-        import pyotp
-        try: totp_now=pyotp.TOTP(TOTP_SECRET).now() if TOTP_SECRET else None
-        except: totp_now=None
-        cand=CANDIDATES[idx]; full=f"{HOST}/{cand}"
-        out.append(f"<h1>TRY {cand}</h1><p>Full: {full}</p><p>DOB:{DOB_YEAR} TOTP:{totp_now}</p>")
         import alice_blue.alice_blue as mod
-        try: mod.AliceBlue_urls['twoFA']=full
-        except: pass
+        for name in ["AliceBlue_urls","urls","URLS","base_url","BASE_URL"]:
+            if hasattr(mod,name): out.append(f"<b>{name} = {getattr(mod,name)}</b>")
+        # Module file la URL maadhiri irukkura ella line-um thedu
+        import pathlib
+        txt=pathlib.Path(mod.__file__).read_text(errors="ignore")
+        for i,line in enumerate(txt.splitlines(),1):
+            low=line.lower()
+            if "http" in low or "aliceblue" in low or "valid" in low or "twofa" in low or "sso" in low or "ant." in low:
+                out.append(f"Line {i}: {line.strip()[:300]}")
+    except Exception as e: out.append(f"Err {e} {traceback.format_exc()[:2000]}")
+    return "<br>".join(out)+"<br><a href='/'>Home</a>"
+@app.route('/weblogin')
+def weblogin():
+    out=["<h1>WEBLOGIN FULL RESPONSE</h1>"]
+    try:
+        import alice_blue.alice_blue as mod
+        # Spy - WebLogin enna return pannudhu nu paaru
+        orig_post=mod.requests.post
+        def spy(url,*a,**kw):
+            r=orig_post(url,*a,**kw)
+            try: body=r.text[:3000]
+            except: body="?"
+            out.append(f"<p><b>POST {url}</b> Status:{r.status_code}<br>Body:{body}<br>Data:{str(kw.get('data') or kw.get('json'))[:600]}</p>")
+            return r
+        mod.requests.post=spy
         try:
-            if hasattr(mod.AliceBlue,"AliceBlue_urls"): mod.AliceBlue.AliceBlue_urls['twoFA']=full
-        except: pass
-        for label, tfa in [("DOB",DOB_YEAR),("TOTP",totp_now)]:
-            if not tfa: continue
-            out.append(f"<b>--- {label}={tfa} ---</b>")
+            obj=mod.AliceBlue.__new__(mod.AliceBlue)
+            # WebLogin varaikkum mattum try - twoFA la fail aana parava illa, log already irukkum
+            try: sess=obj.login_and_get_sessionID(USER_ID,PASSWORD,str(DOB_YEAR),APP_ID,APP_SECRET)
+            except Exception as e: out.append(f"<p>Login End Err (expected): {e}</p>")
+        finally: mod.requests.post=orig_post
+        out.append("<p><b>WebLogin Body la - Pudhu URL / Token / Next Step irukka paaru! 'questions' ku appuram enna irukku?</b></p>")
+    except Exception as e: out.append(f"Err {e} {traceback.format_exc()[:2000]}")
+    return "<br>".join(out)+"<br><a href='/'>Home</a>"
+@app.route('/probe2')
+def probe2():
+    import requests
+    out=["<h1>PROBE HOST x PATH - 404 Illa Edhu?</h1>"]
+    found=[]
+    for h in HOSTS:
+        for p in PATHS:
+            full=f"{h}/{p}"
             try:
-                obj = mod.AliceBlue.__new__(mod.AliceBlue)
-                sess = obj.login_and_get_sessionID(USER_ID, PASSWORD, str(tfa), APP_ID, APP_SECRET)
-                out.append(f"Returned: {str(sess)[:100] if sess else 'NONE'}")
-                if sess and len(str(sess))>10:
-                    out.append(f"<h2 style='color:green'>SUCCESS! Correct URL={full} via {label}</h2><p>Full Session: {sess}</p>")
-                    try:
-                        real = mod.AliceBlue(username=USER_ID, session_id=sess)
-                        prof = real.get_profile()
-                        out.append(f"<h3>Profile: {str(prof)[:800]}</h3>")
-                    except Exception as e: out.append(f"Profile Err (parava illa): {e}")
-                    return "<br>".join(out) + "<br><a href='/'>Home</a>"
+                r=requests.post(full, json={"userId":USER_ID,"answer":DOB_YEAR}, timeout=6)
+                if r.status_code!=404:
+                    found.append(full)
+                    out.append(f"<p style='color:green'><b>✅ {full} Status:{r.status_code} Body:{(r.text or '')[:300]}</b></p>")
             except Exception as e:
-                out.append(f"Fail {label}: {str(e)[:400]}")
-        out.append("<b>Idhu fail - Adutha URL-a Home la click pannu</b>")
-    except Exception as e:
-        out.append(f"Err {e} {traceback.format_exc()[:2000]}")
-    return "<br>".join(out) + "<br><a href='/'>Home</a>"
+                pass
+    if not found:
+        out.append("<p><b>Ella 84-um 404 / fail - Host vera edathula irukku! /weblogin + /sdkurls paaru!</b></p>")
+    else:
+        out.append(f"<p><b>FOUND: {found}</b></p>")
+    return "<br>".join(out)+"<br><a href='/'>Home</a>"
 if __name__=='__main__':
     port=int(os.environ.get("PORT",10000))
     app.run(host='0.0.0.0', port=port)
