@@ -42,7 +42,7 @@ def log(m):
 def home():
     auth = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
     s = STORE.get("session")
-    return f"<h1>V62 - FULLY AUTO BOT</h1><p>Session: {'YES' if s else 'ILLA'}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Morning LOGIN pannitu - START BOT pannunga - Appuram Bot thana paathukkum!</b></p>"
+    return f"<h1>V63 - FULLY AUTO BOT - FUNDS FIXED</h1><p>Session: {'YES' if s else 'ILLA'}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Morning LOGIN pannitu - START BOT pannunga - Appuram Bot thana paathukkum!</b></p>"
 
 @app.route('/manual')
 def manual():
@@ -71,7 +71,7 @@ def exchange():
     except Exception as e:
         return f"Err {e} <a href='/'>Home</a>"
 
-# ---------- API HELPERS ----------
+# ---------- API HELPERS - FUNDS FIXED ✅ ----------
 def get_funds():
     import requests
     sess = STORE.get("session")
@@ -83,7 +83,14 @@ def get_funds():
         r = requests.get("https://ant.aliceblueonline.com/open-api/od/v1/limits", headers=h, params={"userId": USER_ID}, timeout=7)
         j = r.json()
         log(f"Funds Raw: {str(j)[:200]}")
-        return float(j.get("result", {}).get("tradingLimit", 0))
+        res = j.get("result", {})
+        # FIX: result List-a Vandha - First Item-a Edu! - AliceBlue List Anuppudhu!
+        if isinstance(res, list):
+            if len(res) > 0:
+                res = res[0]
+            else:
+                return 0
+        return float(res.get("tradingLimit", 0))
     except Exception as e:
         log(f"Funds Err: {e}")
         return -1
