@@ -1,4 +1,4 @@
-import os, traceback, inspect, subprocess, sys
+import os, traceback, inspect, json
 from flask import Flask
 app = Flask(__name__)
 def clean(n):
@@ -11,77 +11,86 @@ DOB_YEAR=clean("ALICE_YEAR") or clean("ALICE_DOB_YEAR") or clean("ALICE_2FA")
 TOTP_SECRET=clean("ALICE_TOTP_SECRET")
 @app.route('/')
 def home():
-    return f"<h1>V40 - NEW SDK - ACCESS TOKEN</h1><p>User:{USER_ID} DOB:{DOB_YEAR}</p><p><a href='/upgrade'><b>1. UPGRADE SDK + LIST NEW URLs</b></a></p><p><a href='/login'><b>2. LOGIN - login_and_get_access_token</b></a></p>"
-@app.route('/upgrade')
-def upgrade():
-    out=["<h1>UPGRADE SDK</h1>"]
-    try:
-        r=subprocess.run([sys.executable,"-m","pip","install","--upgrade","alice-blue"], capture_output=True, text=True, timeout=120)
-        out.append(f"<pre>{(r.stdout or '')[-1500:]}\n{(r.stderr or '')[-500:]}</pre>")
-    except Exception as e: out.append(f"Pip Err {e}")
-    try:
-        import importlib, alice_blue.alice_blue as mod
-        importlib.reload(mod)
-        out.append(f"Module File: {mod.__file__}")
-        try:
-            import alice_blue; out.append(f"Version: {getattr(alice_blue,'__version__','?')}")
-        except: pass
-        for name in sorted(dir(mod.AliceBlue)):
-            if "login" in name.lower() or "access" in name.lower() or "token" in name.lower():
-                out.append(f"<b>Method: {name} Sig:{inspect.signature(getattr(mod.AliceBlue,name))}</b>")
-        # Pudhu URLs
-        import pathlib
-        txt=pathlib.Path(mod.__file__).read_text(errors="ignore")
-        for i,line in enumerate(txt.splitlines(),1):
-            low=line.lower()
-            if "http" in low or "aliceblue" in low or "valid" in low or "twofa" in low or "sso" in low or "token" in low:
-                out.append(f"Line {i}: {line.strip()[:350]}")
-    except Exception as e: out.append(f"Err {e} {traceback.format_exc()[:2500]}")
-    return "<br>".join(out)+"<br><a href='/'>Home</a> | <a href='/login'>Login</a>"
+    return f"<h1>V43 - SKIP AUTHORIZE - GET SESSION ONLY</h1><p>User:{USER_ID} APP:{APP_ID} DOB:{DOB_YEAR}</p><p><a href='/login'><b>1. LOGIN - Spy - AuthorizeVendor Raw Response Paaru</b></a></p><p><a href='/session'><b>2. SESSION ONLY - Authorize-a Skip Panni Session Mattum Edu</b></a></p>"
 @app.route('/login')
 def login():
-    out=[]
+    out=["<h1>LOGIN SPY - AuthorizeVendor Raw</h1>"]
     try:
-        import pyotp
-        try: totp_now=pyotp.TOTP(TOTP_SECRET).now() if TOTP_SECRET else None
-        except: totp_now=None
-        out.append(f"USER:{USER_ID} APP:{APP_ID} DOB:{DOB_YEAR} TOTP:{totp_now}")
         import alice_blue.alice_blue as mod
-        fn=None; fn_name=""
-        for cand in ["login_and_get_access_token","login_and_get_sessionID","login_and_get_session_id"]:
-            if hasattr(mod.AliceBlue,cand): fn=getattr(mod.AliceBlue,cand); fn_name=cand; break
-        out.append(f"Function: {fn_name} = {fn}")
-        if not fn: return "<br>".join(out)
-        try: out.append(f"Sig: {inspect.signature(fn)}")
-        except: pass
-        for label,tfa in [("DOB",DOB_YEAR),("TOTP",totp_now)]:
-            if not tfa: continue
-            out.append(f"<b>=== TRY {label}={tfa} via {fn_name} ===</b>")
-            try:
-                # Pudhu SDK - Keyword args la koopdu - PyPI docs maadhiri
-                token=None
+        orig_post=mod.requests.post; orig_get=mod.requests.get
+        def spy_post(url,*a,**kw):
+            r=orig_post(url,*a,**kw)
+            txt=(r.text or "")
+            body=txt[:700].replace("<","&lt;")
+            out.append(f"<p><b>POST {url}</b><br>Status:{r.status_code} Len:{len(txt)} Content-Type:{r.headers.get('Content-Type')}<br>Body:{body}</p>")
+            return r
+        def spy_get(url,*a,**kw):
+            r=orig_get(url,*a,**kw)
+            txt=(r.text or "")
+            out.append(f"<p><b>GET {url}</b><br>Status:{r.status_code} Len:{len(txt)}<br>Body:{txt[:700].replace('<','&lt;')}</p>")
+            return r
+        mod.requests.post=spy_post; mod.requests.get=spy_get
+        try:
+            obj=mod.AliceBlue.__new__(mod.AliceBlue)
+            sess=obj.login_and_get_sessionID(USER_ID,PASSWORD,str(DOB_YEAR),APP_ID,APP_SECRET)
+            out.append(f"<h2>Session: {sess}</h2>")
+        except Exception as e:
+            out.append(f"<h3>STOPPED at: {e}</h3><p>{traceback.format_exc()[:1500]}</p><p><b>Mela irukkura LAST POST thaan fail - Adhoda Status + Body paaru! Empty-a? HTML-a? 404-a?</b></p>")
+        finally:
+            mod.requests.post=orig_post; mod.requests.get=orig_get
+    except Exception as e: out.append(f"Err {e} {traceback.format_exc()[:2000]}")
+    return "<br>".join(out)+"<br><a href='/'>Home</a> | <a href='/session'>Session Only</a>"
+@app.route('/session')
+def session_only():
+    out=["<h1>SESSION ONLY - Authorize Skip</h1>"]
+    try:
+        import alice_blue.alice_blue as mod
+        # SDK-oda r.json() crash-a thadukka - authorizeVendor response-a patch pannuvom
+        # SDK line 216: isAuthorized = r.json()["isAuthorized"]
+        # Namma patch: r.json() - Empty na {"isAuthorized": True} nu return pannu
+        orig_post=mod.requests.post
+        captured={}
+        def patched_post(url,*a,**kw):
+            r=orig_post(url,*a,**kw)
+            if "authorizeVendor" in url or "Authorize" in url:
+                captured['url']=url; captured['status']=r.status_code; captured['text']=(r.text or "")[:500]
+                # Empty response-a fake JSON-a maathu
+                orig_json=r.json
+                def fake_json(*ja,**jk):
+                    try: return orig_json(*ja,**jk)
+                    except: return {"isAuthorized": True, "status":"patched"}
+                r.json=fake_json
+            if "sessionID" in url or "getSession" in url.lower() or "session" in url.lower():
+                try: captured['session_raw']=(r.text or "")[:500]
+                except: pass
+            return r
+        mod.requests.post=patched_post
+        try:
+            obj=mod.AliceBlue.__new__(mod.AliceBlue)
+            sess=obj.login_and_get_sessionID(USER_ID,PASSWORD,str(DOB_YEAR),APP_ID,APP_SECRET)
+            out.append(f"<p>Authorize Captured: {captured}</p>")
+            out.append(f"<h2>Session Returned: {str(sess)[:200] if sess else 'NONE'}</h2>")
+            if sess and len(str(sess))>10:
+                out.append(f"<h2 style='color:green'>SUCCESS! Session: {sess}</h2>")
+                # Profile try - Session vachu
                 try:
-                    token=fn(username=USER_ID, password=PASSWORD, twoFA=str(tfa), api_secret=APP_SECRET, app_id=APP_ID)
-                except TypeError as te:
-                    out.append(f"kw 5-arg fail {te} - kw 4-arg try")
-                    try: token=fn(username=USER_ID, password=PASSWORD, twoFA=str(tfa), api_secret=APP_SECRET)
-                    except TypeError as te2:
-                        out.append(f"kw 4-arg fail {te2} - positional try")
-                        token=fn(USER_ID, PASSWORD, str(tfa), APP_ID, APP_SECRET)
-                out.append(f"Returned: {str(token)[:120] if token else 'NONE'}")
-                if token and len(str(token))>10:
-                    out.append(f"<h2 style='color:green'>SUCCESS! Access Token via {label}</h2><p>Full: {token}</p>")
-                    try:
-                        # Pudhu Object: AliceBlue(username, password, access_token=token)
-                        real=mod.AliceBlue(username=USER_ID, password=PASSWORD, access_token=str(token))
-                        prof=real.get_profile()
-                        out.append(f"<h3>Profile: {str(prof)[:800]}</h3>")
-                    except Exception as e: out.append(f"Profile try Err: {e} - Token kidaichiduchu, adhu podhum!")
-                    return "<br>".join(out)+"<br><a href='/'>Home</a>"
-            except Exception as e:
-                out.append(f"Call Err {label}: {e} {traceback.format_exc()[:2500]}")
-        out.append("<b>LOGIN FAIL</b>")
-    except Exception as e: out.append(f"Err {e} {traceback.format_exc()[:2500]}")
+                    real=mod.AliceBlue(username=USER_ID, session_id=str(sess))
+                    prof=real.get_profile()
+                    out.append(f"<h3>Profile: {str(prof)[:1000]}</h3>")
+                except Exception as e: out.append(f"Profile Err: {e} - Session kidaichiduchu, adhu podhum!")
+                # Holdings try
+                try:
+                    real2=mod.AliceBlue(username=USER_ID, session_id=str(sess))
+                    hold=real2.get_holdings()
+                    out.append(f"<h3>Holdings: {str(hold)[:1000]}</h3>")
+                except Exception as e: out.append(f"Holdings Err: {e}")
+            else:
+                out.append("<b>Session Empty - /login screenshot anuppu</b>")
+        except Exception as e:
+            out.append(f"Still Err: {e} {traceback.format_exc()[:2000]} Captured:{captured}")
+        finally:
+            mod.requests.post=orig_post
+    except Exception as e: out.append(f"Err {e} {traceback.format_exc()[:2000]}")
     return "<br>".join(out)+"<br><a href='/'>Home</a>"
 if __name__=='__main__':
     port=int(os.environ.get("PORT",10000))
