@@ -42,7 +42,7 @@ def log(m):
 def home():
     auth = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
     s = STORE.get("session")
-    return f"<h1>V65 - FULLY AUTO - ITM 1 - TEST ORDER READY</h1><p>Session: {'YES' if s else 'ILLA'}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
+    return f"<h1>V66 - FULLY AUTO - ITM 1 - ORDER URL FIXED</h1><p>Session: {'YES' if s else 'ILLA'}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
 
 @app.route('/manual')
 def manual():
@@ -106,17 +106,34 @@ def get_ltp():
     except:
         return None
 
+# ---------- ORDER FUNCTIONS - V66 FIX ✅ - placeOrder + Safe JSON ----------
 def place_buy(strike, opt_type):
     import requests
     sess = STORE.get("session")
     if not sess:
         return {"error": "No Session"}
     h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
-    payload = {"userId": USER_ID, "exchange": "NFO", "tradingSymbol": f"NIFTY{strike}{opt_type}", "quantity": 65, "transactionType": "BUY", "orderType": "MARKET", "productType": "INTRADAY", "validity": "DAY", "price": "0", "triggerPrice": "0", "disclosedQuantity": "0"}
+    payload = {
+        "complexity": "REGULAR",
+        "discQty": 0,
+        "exch": "NFO",
+        "pCode": "INTRADAY",
+        "price": 0,
+        "priceType": "MARKET",
+        "qty": 65,
+        "ret": "DAY",
+        "tradingSymbol": f"NIFTY{strike}{opt_type}",
+        "transType": "BUY",
+        "trigPrice": 0,
+        "orderTag": "VIJAYAN_ITM1"
+    }
     try:
-        r = requests.post("https://ant.aliceblueonline.com/open-api/od/v1/orders/place", headers=h, json=payload, timeout=10)
-        log(f"BUY ORDER {strike}{opt_type} Resp:{r.text[:500]}")
-        return r.json()
+        r = requests.post("https://ant.aliceblueonline.com/open-api/od/v1/orders/placeOrder", headers=h, json=payload, timeout=10)
+        log(f"BUY ORDER {strike}{opt_type} Status:{r.status_code} Resp:{r.text[:500]}")
+        try:
+            return r.json()
+        except:
+            return {"raw": r.text[:500], "status": r.status_code}
     except Exception as e:
         log(f"Order Err {e}")
         return {"error": str(e)}
@@ -127,11 +144,27 @@ def place_sell(strike, opt_type):
     if not sess:
         return {"error": "No Session"}
     h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
-    payload = {"userId": USER_ID, "exchange": "NFO", "tradingSymbol": f"NIFTY{strike}{opt_type}", "quantity": 65, "transactionType": "SELL", "orderType": "MARKET", "productType": "INTRADAY", "validity": "DAY", "price": "0", "triggerPrice": "0", "disclosedQuantity": "0"}
+    payload = {
+        "complexity": "REGULAR",
+        "discQty": 0,
+        "exch": "NFO",
+        "pCode": "INTRADAY",
+        "price": 0,
+        "priceType": "MARKET",
+        "qty": 65,
+        "ret": "DAY",
+        "tradingSymbol": f"NIFTY{strike}{opt_type}",
+        "transType": "SELL",
+        "trigPrice": 0,
+        "orderTag": "VIJAYAN_ITM1_EXIT"
+    }
     try:
-        r = requests.post("https://ant.aliceblueonline.com/open-api/od/v1/orders/place", headers=h, json=payload, timeout=10)
-        log(f"SELL ORDER {strike}{opt_type} Resp:{r.text[:500]}")
-        return r.json()
+        r = requests.post("https://ant.aliceblueonline.com/open-api/od/v1/orders/placeOrder", headers=h, json=payload, timeout=10)
+        log(f"SELL ORDER {strike}{opt_type} Status:{r.status_code} Resp:{r.text[:500]}")
+        try:
+            return r.json()
+        except:
+            return {"raw": r.text[:500], "status": r.status_code}
     except Exception as e:
         log(f"Sell Err {e}")
         return {"error": str(e)}
