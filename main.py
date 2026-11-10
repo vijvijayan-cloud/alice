@@ -1,6 +1,6 @@
 import os, hashlib, json, threading, time, math
 from flask import Flask, request, redirect
-from datetime import datetime
+from datetime import datetime, timedelta
 app = Flask(__name__)
 
 def clean(n):
@@ -37,12 +37,30 @@ def log(m):
     BOT["logs"] = BOT["logs"][:60]
     print(m)
 
+# ---------- EXPIRY FIX ✅ - Adutha Thursday = Weekly Expiry ----------
+def get_expiry():
+    today = datetime.now()
+    # Thursday = 3 (Monday=0). Inniki Thursday na - Inniki Expiry. Illa na - Adutha Thursday
+    days_ahead = (3 - today.weekday()) % 7
+    if days_ahead == 0:
+        exp = today
+    else:
+        exp = today + timedelta(days=days_ahead)
+    # Format: 12NOV26
+    return exp.strftime("%d%b%y").upper()
+
+def build_symbol(strike, opt_type):
+    exp = get_expiry()
+    sym = f"NIFTY{exp}{strike}{opt_type}"
+    log(f"Symbol Build: {sym} | Expiry: {exp}")
+    return sym
+
 # ---------- HOME / LOGIN ----------
 @app.route('/')
 def home():
     auth = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
     s = STORE.get("session")
-    return f"<h1>V67 - FULLY AUTO - ITM 1 - PAZHAYA URL FIXED</h1><p>Session: {'YES' if s else 'ILLA'}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
+    return f"<h1>V68 - FULLY AUTO - ITM 1 - EXPIRY FIXED</h1><p>Session: {'YES' if s else 'ILLA'} | Expiry: {get_expiry()}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
 
 @app.route('/manual')
 def manual():
@@ -71,7 +89,7 @@ def exchange():
     except Exception as e:
         return f"Err {e} <a href='/'>Home</a>"
 
-# ---------- API HELPERS - FUNDS FIXED ✅ ----------
+# ---------- API HELPERS ----------
 def get_funds():
     import requests
     sess = STORE.get("session")
@@ -106,32 +124,37 @@ def get_ltp():
     except:
         return None
 
-# ---------- ORDER FUNCTIONS - V67 FIX ✅ - PAZHAYA ANT API - executePlaceOrder ----------
+# ---------- ORDER FUNCTIONS - V68 FIX ✅ - Expiry Symbol + userId + Full Log ----------
 def place_buy(strike, opt_type):
     import requests
     sess = STORE.get("session")
     if not sess:
         return {"error": "No Session"}
     h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
+    sym = build_symbol(strike, opt_type)
     payload = {
+        "userId": USER_ID,
+        "complexity": "REGULAR",
+        "discQty": 0,
         "exch": "NFO",
         "pCode": "MIS",
         "price": 0,
         "priceType": "MARKET",
         "qty": 65,
         "ret": "DAY",
-        "tradingSymbol": f"NIFTY{strike}{opt_type}",
+        "tradingSymbol": sym,
         "transType": "BUY",
         "trigPrice": 0,
         "orderTag": "VIJAYAN_ITM1"
     }
+    log(f"BUY Payload: {payload}")
     try:
         r = requests.post("https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/placeOrder/executePlaceOrder", headers=h, json=payload, timeout=10)
-        log(f"BUY ORDER {strike}{opt_type} Status:{r.status_code} Resp:{r.text[:600]}")
+        log(f"BUY ORDER {sym} Status:{r.status_code} Resp:{r.text[:800]} Headers:{dict(r.headers)}")
         try:
             return r.json()
         except:
-            return {"raw": r.text[:600], "status": r.status_code}
+            return {"raw": r.text[:800], "status": r.status_code}
     except Exception as e:
         log(f"Order Err {e}")
         return {"error": str(e)}
@@ -142,30 +165,35 @@ def place_sell(strike, opt_type):
     if not sess:
         return {"error": "No Session"}
     h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
+    sym = build_symbol(strike, opt_type)
     payload = {
+        "userId": USER_ID,
+        "complexity": "REGULAR",
+        "discQty": 0,
         "exch": "NFO",
         "pCode": "MIS",
         "price": 0,
         "priceType": "MARKET",
         "qty": 65,
         "ret": "DAY",
-        "tradingSymbol": f"NIFTY{strike}{opt_type}",
+        "tradingSymbol": sym,
         "transType": "SELL",
         "trigPrice": 0,
         "orderTag": "VIJAYAN_ITM1_EXIT"
     }
+    log(f"SELL Payload: {payload}")
     try:
         r = requests.post("https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/placeOrder/executePlaceOrder", headers=h, json=payload, timeout=10)
-        log(f"SELL ORDER {strike}{opt_type} Status:{r.status_code} Resp:{r.text[:600]}")
+        log(f"SELL ORDER {sym} Status:{r.status_code} Resp:{r.text[:800]}")
         try:
             return r.json()
         except:
-            return {"raw": r.text[:600], "status": r.status_code}
+            return {"raw": r.text[:800], "status": r.status_code}
     except Exception as e:
         log(f"Sell Err {e}")
         return {"error": str(e)}
 
-# ---------- BOT LOOP - FULLY AUTO - ITM 1 ----------
+# ---------- BOT LOOP ----------
 def bot_loop():
     while True:
         try:
@@ -239,7 +267,7 @@ def dashboard():
     logs = "<br>".join(b["logs"][:25])
     return f"""
     <h1>VIJAYAN ALGO - FULLY AUTO - ITM 1 - NIFTY MOMENTUM</h1>
-    <p><b>Funds:</b> Rs.{b['funds']} | <b>Mode:</b> {b['mode']} | <b>Status:</b> {b['status']}</p>
+    <p><b>Funds:</b> Rs.{b['funds']} | <b>Mode:</b> {b['mode']} | <b>Status:</b> {b['status']} | <b>Expiry:</b> {get_expiry()}</p>
     <table border=1 cellpadding=8><tr><th>Strategy</th><th>Status</th><th>PNL</th><th>Broker</th></tr>
     <tr><td>VIJAYAN NIFTY MOMENTUM - 1 LOT - ITM 1 - 5MIN BREAKOUT - AUTO</td><td>{b['status']}</td><td>Rs.{b['pnl']}</td><td>ALICEBLUE</td></tr></table>
     <h2>Live Status</h2>
@@ -305,14 +333,14 @@ def testorder():
     otype = request.args.get("type", "CE")
     log(f"🧪 IPPAVE TEST ORDER - BUY {strike}{otype} - 1 Lot - Real API Call!")
     res = place_buy(strike, otype)
-    log(f"🧪 TEST ORDER Resp: {str(res)[:600]}")
+    log(f"🧪 TEST ORDER Resp: {str(res)[:800]}")
     return redirect("/dashboard")
 
 @app.route('/debug')
 def debug():
     import requests
     sess = STORE.get("session")
-    out = [f"<h1>DEBUG</h1><p>Session: {'YES - ' + sess[:20] + '...' if sess else 'ILLA - LOGIN pannunga!'}</p>"]
+    out = [f"<h1>DEBUG</h1><p>Session: {'YES - ' + sess[:20] + '...' if sess else 'ILLA - LOGIN pannunga!'}</p><p>Expiry: {get_expiry()} | Test Symbol: {build_symbol(24450, 'CE')}</p>"]
     if sess:
         h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
         try:
