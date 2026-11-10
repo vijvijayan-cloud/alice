@@ -46,28 +46,32 @@ def log(m):
     BOT["logs"] = BOT["logs"][:60]
     print(m)
 
+# ---------- EXPIRY FIX ✅ V73 - TUESDAY, NOT Thursday! ----------
 def get_expiry():
     today = ist_now()
-    days_ahead = (3 - today.weekday()) % 7
+    # Tuesday = 1 (Monday=0). Inniki Tuesday na - Inniki Expiry.
+    # 10 Nov 2026 Tuesday - Holiday - Adhu 9 Nov ku Poyiduchu - Adhanaala Adutha Tuesday 17 Nov thaan!
+    # Simple Rule: Inniki Tuesday + Market Open na - Inniki, Illa na - Adutha Tuesday
+    # Inniki 10 Nov - Holiday nu Namba Code ku Theriyaadhu - Adhanaala - Direct-a Adutha Tuesday Use Pannu!
+    # 10 Nov ku - 17 Nov thaan Correct!
+    if today.date().isoformat() == "2026-11-10":
+        return "17NOV26"
+    days_ahead = (1 - today.weekday()) % 7
     exp = today if days_ahead == 0 else today + timedelta(days=days_ahead)
     return exp.strftime("%d%b%y").upper()
 
 def build_symbol(strike, opt_type):
     exp = get_expiry()
-    # ✅ SPACE-oda Symbol - Idhu thaan Correct!
     spaced = f"NIFTY {exp} {strike} {opt_type}"
     compact = f"NIFTY{exp}{strike}{opt_type}"
-    log(f"Symbol Build: Spaced=[{spaced}] Compact=[{compact}] Expiry:{exp}")
+    log(f"Symbol Build: Spaced=[{spaced}] Compact=[{compact}] Expiry:{exp} (TUESDAY)")
     return spaced, compact
 
-# ---------- symbolId + Spaced Symbol FIX ✅ - Space-a Remove Panni Compare Pannu! ----------
 def get_symbol_info(strike, opt_type):
     import requests
     spaced, compact = build_symbol(strike, opt_type)
-    # Cache la Irundha - Adha Return pannu
     if compact in STORE["symbol_cache"]:
         return STORE["symbol_cache"][compact], STORE["spaced_cache"].get(compact, spaced)
-    # Normalise - Space / - / _ Ellam Remove Panni Compare Pannanum!
     target = re.sub(r'[^A-Z0-9]', '', spaced.upper())
     log(f"Looking for Normalised: {target}")
     try:
@@ -82,23 +86,25 @@ def get_symbol_info(strike, opt_type):
                 log(f"Contract Master {url} Status:{r.status_code} Len:{len(txt)}")
                 if r.status_code != 200 or len(txt) < 1000:
                     continue
-                # Line by Line - Normalise Panni Compare!
+                # DEBUG: First 3 NIFTY Lines-a Kaattu - Format Puriya!
+                shown = 0
+                for line in txt.splitlines():
+                    if "NIFTY" in line and shown < 3:
+                        log(f"SAMPLE NIFTY Line: {line[:300]}")
+                        shown += 1
                 for line in txt.splitlines():
                     if "NIFTY" not in line:
                         continue
                     norm_line = re.sub(r'[^A-Z0-9]', '', line.upper())
                     if target in norm_line:
                         log(f"✅ MATCH Line: {line[:250]}")
-                        # CSV Split - Token - Usually First Column
                         parts = [p.strip() for p in line.split(",")]
                         log(f"Parts: {parts[:8]}")
-                        # First numeric token - Adhu thaan symbolId
                         token = None
                         for p in parts:
                             if p.isdigit() and len(p) >= 4:
                                 token = p
                                 break
-                        # TradingSymbol - NIFTY nu Start Aagura Column - Adhu thaan Spaced Symbol!
                         real_sym = spaced
                         for p in parts:
                             if p.upper().startswith("NIFTY"):
@@ -123,7 +129,7 @@ def home():
     auth = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
     s = STORE.get("session")
     now = ist_now().strftime("%H:%M:%S IST - %d %b %Y")
-    return f"<h1>V72 - FULLY AUTO - ITM 1 - SPACE SYMBOL FIX</h1><p>Server Time (IST): {now}</p><p>Session: {'YES' if s else 'ILLA'} | Expiry: {get_expiry()}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
+    return f"<h1>V73 - FULLY AUTO - ITM 1 - TUESDAY EXPIRY FIX</h1><p>Server Time (IST): {now}</p><p>Session: {'YES' if s else 'ILLA'} | Expiry: {get_expiry()} (TUESDAY)</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
 
 @app.route('/manual')
 def manual():
@@ -186,7 +192,6 @@ def get_ltp():
     except:
         return None
 
-# ---------- ORDER - V72 FIX ✅ - Spaced Symbol + symbolId - Rendu Try! ----------
 def place_order_api(strike, opt_type, trans):
     import requests
     sess = STORE.get("session")
@@ -194,8 +199,6 @@ def place_order_api(strike, opt_type, trans):
         return {"error": "No Session"}
     sid, real_sym = get_symbol_info(strike, opt_type)
     spaced, compact = build_symbol(strike, opt_type)
-    # TRY 1 - Real Symbol (Contract Master la Irukkura Symbol) + Token
-    # TRY 2 - Spaced Symbol mattum
     tries = []
     if sid:
         tries.append((real_sym, sid))
@@ -205,21 +208,7 @@ def place_order_api(strike, opt_type, trans):
     h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json", "Accept": "application/json", "userId": USER_ID}
     last = {"error": "No Try"}
     for idx, (sym_try, sid_try) in enumerate(tries):
-        payload = {
-            "userId": USER_ID,
-            "exch": "NFO",
-            "pCode": "MIS",
-            "price": 0,
-            "priceType": "MARKET",
-            "qty": 65,
-            "ret": "DAY",
-            "tradingSymbol": sym_try,
-            "transType": trans,
-            "trigPrice": 0,
-            "orderTag": "VIJAYAN_ITM1",
-            "complexity": "REGULAR",
-            "discQty": 0,
-        }
+        payload = {"userId": USER_ID, "exch": "NFO", "pCode": "MIS", "price": 0, "priceType": "MARKET", "qty": 65, "ret": "DAY", "tradingSymbol": sym_try, "transType": trans, "trigPrice": 0, "orderTag": "VIJAYAN_ITM1", "complexity": "REGULAR", "discQty": 0}
         if sid_try:
             payload["symbolId"] = sid_try
             payload["token"] = sid_try
@@ -232,11 +221,9 @@ def place_order_api(strike, opt_type, trans):
             except:
                 j = {"raw": r.text[:1000], "status": r.status_code}
             last = j
-            # Success-a irundha - Stop!
             if r.status_code == 200 and ("Success" in str(j) or "orderId" in str(j).lower() or "Order" in str(j)):
                 log(f"✅ TRY {idx+1} SUCCESS!")
                 return j
-            # 400 Empty Illa - Vera Error Vandha - Adha Return pannu - Try Vendaam!
             if r.status_code != 400 or len(r.text.strip()) > 5:
                 return j
         except Exception as e:
@@ -323,7 +310,7 @@ def dashboard():
     now_str = ist_now().strftime("%H:%M:%S IST - %d %b %Y")
     return f"""
     <h1>VIJAYAN ALGO - FULLY AUTO - ITM 1 - NIFTY MOMENTUM</h1>
-    <p><b>Server Time (IST):</b> {now_str} | <b>Funds:</b> Rs.{b['funds']} | <b>Mode:</b> {b['mode']} | <b>Status:</b> {b['status']} | <b>Expiry:</b> {get_expiry()}</p>
+    <p><b>Server Time (IST):</b> {now_str} | <b>Funds:</b> Rs.{b['funds']} | <b>Mode:</b> {b['mode']} | <b>Status:</b> {b['status']} | <b>Expiry:</b> {get_expiry()} (TUESDAY)</p>
     <table border=1 cellpadding=8><tr><th>Strategy</th><th>Status</th><th>PNL</th><th>Broker</th></tr>
     <tr><td>VIJAYAN NIFTY MOMENTUM - 1 LOT - ITM 1 - 5MIN BREAKOUT - AUTO</td><td>{b['status']}</td><td>Rs.{b['pnl']}</td><td>ALICEBLUE</td></tr></table>
     <h2>Live Status</h2>
@@ -396,7 +383,7 @@ def testorder():
 def debug():
     import requests
     sess = STORE.get("session")
-    out = [f"<h1>DEBUG</h1><p>IST Now: {ist_now().strftime('%H:%M:%S IST - %d %b %Y')}</p><p>Session: {'YES - ' + sess[:20] + '...' if sess else 'ILLA - LOGIN pannunga!'}</p><p>Expiry: {get_expiry()} | Test Symbol Spaced: {build_symbol(24450, 'CE')[0]}</p>"]
+    out = [f"<h1>DEBUG</h1><p>IST Now: {ist_now().strftime('%H:%M:%S IST - %d %b %Y')}</p><p>Session: {'YES - ' + sess[:20] + '...' if sess else 'ILLA - LOGIN pannunga!'}</p><p>Expiry: {get_expiry()} (TUESDAY) | Test Symbol Spaced: {build_symbol(24450, 'CE')[0]}</p>"]
     if sess:
         h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
         try:
