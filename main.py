@@ -1,4 +1,4 @@
-import os, hashlib, json, threading, time, math
+import os, hashlib, json, threading, time, math, csv, io
 from flask import Flask, request, redirect
 from datetime import datetime, timedelta, timezone
 try:
@@ -8,7 +8,6 @@ except:
     IST = timezone(timedelta(hours=5, minutes=30))
 
 def ist_now():
-    # ✅ ELLA IDATHILAYUM - Idha thaan Use Pannanum! - datetime.now() Illa!
     return datetime.now(IST)
 
 app = Flask(__name__)
@@ -18,7 +17,7 @@ def clean(n):
 USER_ID = clean("ALICE_USER_ID")
 APP_ID = clean("ALICE_APP_ID")
 APP_SECRET = clean("ALICE_APP_SECRET")
-STORE = {"session": None}
+STORE = {"session": None, "symbol_cache": {}}
 
 BOT = {
     "status": "STOPPED",
@@ -59,12 +58,61 @@ def build_symbol(strike, opt_type):
     log(f"Symbol Build: {sym} | Expiry: {exp}")
     return sym
 
+# ---------- symbolId FIX ✅ - Contract Master la irundhu Token Edukkuradhu ----------
+def get_symbol_id(sym):
+    import requests
+    if sym in STORE["symbol_cache"]:
+        return STORE["symbol_cache"][sym]
+    try:
+        # AliceBlue Contract Master - NFO
+        urls = [
+            "https://v2api.aliceblueonline.com/restpy/contract_master?exch=NFO",
+            "https://ant.aliceblueonline.com/restpy/contract_master?exch=NFO",
+        ]
+        for url in urls:
+            try:
+                r = requests.get(url, timeout=15)
+                txt = r.text
+                log(f"Contract Master {url} Status:{r.status_code} Len:{len(txt)}")
+                # CSV format-a irundha - Search pannu
+                if sym in txt:
+                    for line in txt.splitlines():
+                        if sym in line:
+                            parts = line.split(",")
+                            log(f"Found Line: {line[:200]}")
+                            # Token - Usually 2nd / 3rd column
+                            for p in parts:
+                                p = p.strip()
+                                if p.isdigit() and len(p) >= 4:
+                                    STORE["symbol_cache"][sym] = p
+                                    log(f"✅ symbolId Found: {p} for {sym}")
+                                    return p
+                # JSON format-a irundha
+                try:
+                    j = r.json()
+                    if isinstance(j, list):
+                        for it in j:
+                            if str(it).find(sym) >= 0:
+                                log(f"Found JSON: {str(it)[:300]}")
+                                for k in ["token", "symbolId", "Token", "instrument_token"]:
+                                    if k in it:
+                                        STORE["symbol_cache"][sym] = str(it[k])
+                                        return str(it[k])
+                except:
+                    pass
+            except Exception as e:
+                log(f"Contract Master Err {url} {e}")
+    except Exception as e:
+        log(f"get_symbol_id Err {e}")
+    log(f"⚠️ symbolId Kedaikkala {sym} - TradingSymbol mattum Use Pannuren!")
+    return None
+
 @app.route('/')
 def home():
     auth = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
     s = STORE.get("session")
     now = ist_now().strftime("%H:%M:%S IST - %d %b %Y")
-    return f"<h1>V70 - FULLY AUTO - ITM 1 - IST FIXED</h1><p>Server Time (IST): {now}</p><p>Session: {'YES' if s else 'ILLA'} | Expiry: {get_expiry()}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
+    return f"<h1>V71 - FULLY AUTO - ITM 1 - symbolId FIX</h1><p>Server Time (IST): {now}</p><p>Session: {'YES' if s else 'ILLA'} | Expiry: {get_expiry()}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
 
 @app.route('/manual')
 def manual():
@@ -127,54 +175,57 @@ def get_ltp():
     except:
         return None
 
-def try_order(url, payload, label):
+# ---------- ORDER - V71 FIX ✅ - ONLY Correct ANT URL + symbolId + Full Headers ----------
+def place_order_api(strike, opt_type, trans):
     import requests
     sess = STORE.get("session")
-    h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
+    if not sess:
+        return {"error": "No Session"}
+    sym = build_symbol(strike, opt_type)
+    sid = get_symbol_id(sym)
+    payload = {
+        "userId": USER_ID,
+        "exch": "NFO",
+        "pCode": "MIS",
+        "price": 0,
+        "priceType": "MARKET",
+        "qty": 65,
+        "ret": "DAY",
+        "tradingSymbol": sym,
+        "transType": trans,
+        "trigPrice": 0,
+        "orderTag": "VIJAYAN_ITM1",
+        "complexity": "REGULAR",
+        "discQty": 0,
+    }
+    if sid:
+        payload["symbolId"] = sid
+        payload["token"] = sid
+    log(f"{trans} Payload: {payload}")
+    h = {
+        "Authorization": f"Bearer {sess}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "userId": USER_ID,
+    }
     try:
-        r = requests.post(url, headers=h, json=payload, timeout=10)
-        log(f"{label} Status:{r.status_code} Resp:{r.text[:800]}")
+        r = requests.post("https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/placeOrder/executePlaceOrder", headers=h, json=payload, timeout=12)
+        log(f"{trans} ORDER {sym} Status:{r.status_code} Resp:{r.text[:1000]}")
+        # Response Headers la - Allow / Error paaru
+        log(f"Resp Headers: {dict(r.headers)}")
         try:
             return r.json()
         except:
-            return {"raw": r.text[:800], "status": r.status_code}
+            return {"raw": r.text[:1000], "status": r.status_code}
     except Exception as e:
-        log(f"{label} Err {e}")
+        log(f"Order Err {e}")
         return {"error": str(e)}
 
 def place_buy(strike, opt_type):
-    sess = STORE.get("session")
-    if not sess:
-        return {"error": "No Session"}
-    sym = build_symbol(strike, opt_type)
-    payload = {"userId": USER_ID, "complexity": "REGULAR", "discQty": 0, "exch": "NFO", "pCode": "MIS", "price": 0, "priceType": "MARKET", "qty": 65, "ret": "DAY", "tradingSymbol": sym, "transType": "BUY", "trigPrice": 0, "orderTag": "VIJAYAN_ITM1"}
-    log(f"BUY Payload: {payload}")
-    res1 = try_order("https://v2api.aliceblueonline.com/orders/placeOrder", payload, "V2-BUY")
-    if isinstance(res1, dict) and (res1.get("status") == "Success" or res1.get("stat") == "Ok" or "orderId" in str(res1).lower()):
-        log("✅ V2 API SUCCESS!")
-        return res1
-    res2 = try_order("https://ant.aliceblueonline.com/open-api/od/v1/orders/placeOrder", payload, "OPENAPI-BUY")
-    if isinstance(res2, dict) and ("orderId" in str(res2).lower() or res2.get("status") == "Success"):
-        log("✅ OPEN-API SUCCESS!")
-        return res2
-    res3 = try_order("https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/placeOrder/executePlaceOrder", payload, "ANT-BUY")
-    return res3
+    return place_order_api(strike, opt_type, "BUY")
 
 def place_sell(strike, opt_type):
-    sess = STORE.get("session")
-    if not sess:
-        return {"error": "No Session"}
-    sym = build_symbol(strike, opt_type)
-    payload = {"userId": USER_ID, "complexity": "REGULAR", "discQty": 0, "exch": "NFO", "pCode": "MIS", "price": 0, "priceType": "MARKET", "qty": 65, "ret": "DAY", "tradingSymbol": sym, "transType": "SELL", "trigPrice": 0, "orderTag": "VIJAYAN_ITM1_EXIT"}
-    log(f"SELL Payload: {payload}")
-    res1 = try_order("https://v2api.aliceblueonline.com/orders/placeOrder", payload, "V2-SELL")
-    if isinstance(res1, dict) and (res1.get("status") == "Success" or "orderId" in str(res1).lower()):
-        return res1
-    res2 = try_order("https://ant.aliceblueonline.com/open-api/od/v1/orders/placeOrder", payload, "OPENAPI-SELL")
-    if isinstance(res2, dict) and ("orderId" in str(res2).lower() or res2.get("status") == "Success"):
-        return res2
-    res3 = try_order("https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/placeOrder/executePlaceOrder", payload, "ANT-SELL")
-    return res3
+    return place_order_api(strike, opt_type, "SELL")
 
 def bot_loop():
     while True:
