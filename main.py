@@ -9,45 +9,62 @@ APP_ID=clean("ALICE_APP_ID")
 APP_SECRET=clean("ALICE_APP_SECRET")
 DOB_YEAR=clean("ALICE_YEAR") or clean("ALICE_DOB_YEAR") or clean("ALICE_2FA")
 TOTP_SECRET=clean("ALICE_TOTP_SECRET")
+LOGS=[]
 @app.route('/')
 def home():
-    return f"<h1>V35 - __new__ TRICK - FINAL</h1><p>User:{USER_ID} DOB:{DOB_YEAR}</p><p><a href='/login'><b>LOGIN - SDK METHOD via __new__</b></a></p>"
+    return f"<h1>V36 - SPY SDK CALLS</h1><p>User:{USER_ID} DOB:{DOB_YEAR}</p><p><a href='/login'><b>LOGIN - SPY</b></a></p>"
 @app.route('/login')
 def login():
-    out=[]
+    out=[]; LOGS.clear()
     try:
         import pyotp
         try: totp_now=pyotp.TOTP(TOTP_SECRET).now() if TOTP_SECRET else None
         except: totp_now=None
         out.append(f"USER:{USER_ID} APP:{APP_ID} DOB:{DOB_YEAR} TOTP:{totp_now}")
-        from alice_blue.alice_blue import AliceBlue
-        out.append(f"Init Sig: {inspect.signature(AliceBlue.__init__)}")
-        out.append(f"Login Sig: {inspect.signature(AliceBlue.login_and_get_sessionID)}")
-        for label, tfa in [("DOB",DOB_YEAR),("TOTP",totp_now)]:
+        import alice_blue.alice_blue as mod
+        # 1. SDK Login Method Source-a full-a kaatu - Line 180-250
+        try:
+            src=inspect.getsource(mod.AliceBlue.login_and_get_sessionID)
+            out.append(f"<h3>LOGIN METHOD FULL SOURCE:</h3><pre>{src[:7000]}</pre>")
+        except Exception as e: out.append(f"Source fail {e}")
+        # 2. SPY - SDK enna URL-a koopduvudhu nu paakkanum - requests.post-a intercept pannu
+        orig_post = mod.requests.post
+        orig_get = mod.requests.get
+        def spy_post(url, *a, **kw):
+            r = orig_post(url, *a, **kw)
+            txt = ""
+            try: txt = r.text[:800]
+            except: txt = "<no text>"
+            LOGS.append(f"<b>POST {url}</b> Status:{r.status_code} Body:{txt} Kw-Keys:{list(kw.keys())} Data:{str(kw.get('data') or kw.get('json'))[:300]}")
+            return r
+        def spy_get(url, *a, **kw):
+            r = orig_get(url, *a, **kw)
+            txt=""
+            try: txt=r.text[:500]
+            except: pass
+            LOGS.append(f"<b>GET {url}</b> Status:{r.status_code} Body:{txt}")
+            return r
+        mod.requests.post = spy_post
+        mod.requests.get = spy_get
+        # 3. SDK Method-a koopdu - Spy log pannum
+        for label, tfa in [("DOB",DOB_YEAR)]:
             if not tfa: continue
-            out.append(f"<b>=== TRY {label}={tfa} ===</b>")
+            out.append(f"<b>=== TRY {label}={tfa} - SPY ON ===</b>")
             try:
-                # __init__-a skip pannu - Object-a direct-a create pannu
-                obj = AliceBlue.__new__(AliceBlue)
-                out.append(f"Dummy Obj Created via __new__: {obj}")
-                # Ippo login method-a koopdu - SDK-e ella vela-yum seiyum
+                obj = mod.AliceBlue.__new__(mod.AliceBlue)
                 sess = obj.login_and_get_sessionID(USER_ID, PASSWORD, str(tfa), APP_ID, APP_SECRET)
-                out.append(f"SDK Returned: {str(sess)[:100] if sess else 'NONE'} Type:{type(sess)}")
+                out.append(f"Returned: {str(sess)[:100] if sess else 'NONE'}")
                 if sess and len(str(sess))>10:
-                    out.append(f"<h2 style='color:green'>SUCCESS! Session via {label}</h2><p>Full Session: {sess}</p><p>Idha copy pannunga - Adutha step: Order test pannalam</p>")
-                    # Session vachu AliceBlue Object create panni profile test pannu
-                    try:
-                        real = AliceBlue(username=USER_ID, session_id=sess)
-                        prof = real.get_profile()
-                        out.append(f"<h3>Profile Test: {str(prof)[:800]}</h3>")
-                    except Exception as e:
-                        out.append(f"Profile Test Err (parava illa, session kidaichiduchu): {e}")
-                    return "<br>".join(out) + "<br><a href='/'>Home</a>"
-                else:
-                    out.append(f"SDK Returned Empty - Full:{sess}")
+                    out.append(f"<h2 style='color:green'>SUCCESS via {label}</h2><p>Full: {sess}</p>")
             except Exception as e:
-                out.append(f"Call Err {label}: {e} {traceback.format_exc()[:3000]}")
-        out.append("<b>LOGIN FAIL</b>")
+                out.append(f"Call Err {label}: {e}")
+                out.append(f"<pre>{traceback.format_exc()[:3000]}</pre>")
+        mod.requests.post = orig_post
+        mod.requests.get = orig_get
+        out.append(f"<h2>SPY LOG - SDK Enna URL-a Koopduchunu Paaru:</h2>")
+        for l in LOGS:
+            out.append(l)
+        out.append("<b>Idhula paaru - Edha URL la Status 404 / Empty Body vandhuchu nu - Adhu thaan thappu URL!</b>")
     except Exception as e:
         out.append(f"Err {e} {traceback.format_exc()[:3000]}")
     return "<br>".join(out) + "<br><a href='/'>Home</a>"
