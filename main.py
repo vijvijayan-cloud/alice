@@ -1,4 +1,4 @@
-import os, hashlib, json, threading, time, math, csv, io, re
+import os, hashlib, json, threading, time
 from flask import Flask, request, redirect
 from datetime import datetime, timedelta, timezone
 try:
@@ -17,400 +17,104 @@ def clean(n):
 USER_ID = clean("ALICE_USER_ID")
 APP_ID = clean("ALICE_APP_ID")
 APP_SECRET = clean("ALICE_APP_SECRET")
-STORE = {"session": None, "symbol_cache": {}, "spaced_cache": {}, "lot_cache": {}}
-
-BOT = {
-    "status": "STOPPED",
-    "mode": "LIVE - FULLY AUTO - ITM 1",
-    "symbol": "NIFTY",
-    "qty": 65,
-    "high": None,
-    "low": None,
-    "candle_locked": False,
-    "entry": None,
-    "type": None,
-    "strike": None,
-    "sl": None,
-    "ltp": None,
-    "pnl": 0,
-    "funds": 0,
-    "funds_checked": False,
-    "order_id": None,
-    "logs": [],
-    "trade_done": False
-}
+STORE = {"session": None}
+BOT = {"logs": [], "status": "STOPPED", "funds": 0}
 
 def log(m):
     t = ist_now().strftime("%H:%M:%S IST")
     BOT["logs"].insert(0, f"[{t}] {m}")
-    BOT["logs"] = BOT["logs"][:60]
+    BOT["logs"] = BOT["logs"][:80]
     print(m)
-
-def get_expiry():
-    today = ist_now()
-    if today.date().isoformat() == "2026-11-10":
-        return "17NOV26"
-    days_ahead = (1 - today.weekday()) % 7
-    exp = today if days_ahead == 0 else today + timedelta(days=days_ahead)
-    return exp.strftime("%d%b%y").upper()
-
-def build_symbol(strike, opt_type):
-    exp = get_expiry()
-    spaced = f"NIFTY {exp} {strike} {opt_type}"
-    compact = f"NIFTY{exp}{strike}{opt_type}"
-    log(f"Symbol Build: Spaced=[{spaced}] Compact=[{compact}] Expiry:{exp} (TUESDAY)")
-    return spaced, compact
-
-# ---------- V75 FIX ✅ - Lot 65 FIXED - Vera Index Lot-a Edukka Koodadhu! ----------
-def get_symbol_info(strike, opt_type):
-    import requests
-    spaced, compact = build_symbol(strike, opt_type)
-    if compact in STORE["symbol_cache"]:
-        return STORE["symbol_cache"][compact], STORE["spaced_cache"].get(compact, spaced), 65
-    try:
-        urls = [
-            "https://v2api.aliceblueonline.com/restpy/contract_master?exch=NFO",
-            "https://ant.aliceblueonline.com/restpy/contract_master?exch=NFO",
-        ]
-        for url in urls:
-            try:
-                r = requests.get(url, timeout=25)
-                txt = r.text
-                log(f"Contract Master {url} Status:{r.status_code} Len:{len(txt)}")
-                if r.status_code != 200 or len(txt) < 1000:
-                    continue
-                for line in txt.splitlines():
-                    line = line.strip()
-                    if not line.startswith("{"):
-                        continue
-                    try:
-                        j = json.loads(line)
-                    except:
-                        continue
-                    if j.get("instrument_type") != "OPTIDX":
-                        continue
-                    if str(j.get("option_type", "")).upper() != opt_type:
-                        continue
-                    try:
-                        if int(float(str(j.get("strike_price", "0")))) != int(strike):
-                            continue
-                    except:
-                        continue
-                    fname = str(j.get("formatted_ins_name", "")) + " " + str(j.get("trading_symbol", "")) + " " + str(j.get("symbol", ""))
-                    up = fname.upper()
-                    # ✅ STRICT NIFTY CHECK - BANKNIFTY / FINNIFTY / MIDCPNIFTY / NXT50 - ELLAM SKIP!
-                    # NIFTY nu Irundha Mattum Podhadhu - "NIFTY " nu Space-oda Irukkanum - Illa na BANKNIFTY!
-                    # formatted_ins_name - "NIFTY 17NOV26..." nu Start Aaganum!
-                    fname_clean = str(j.get("formatted_ins_name", "")).strip().upper()
-                    if not fname_clean.startswith("NIFTY "):
-                        continue
-                    if "BANKNIFTY" in up or "FINNIFTY" in up or "MIDCP" in up or "NXT50" in up:
-                        continue
-                    # Expiry Check - 17NOV26
-                    if "17NOV26" not in up and "17NOV" not in up:
-                        try:
-                            exp_ms = int(j.get("expiry_date", 0))
-                            exp_dt = datetime.fromtimestamp(exp_ms/1000, tz=IST)
-                            if exp_dt.strftime("%d%b%y").upper() != "17NOV26":
-                                continue
-                        except:
-                            continue
-                    log(f"✅ MATCH JSON: {str(j)[:500]}")
-                    token = None
-                    for k in ["token", "instrument_token", "symbolId", "Token", "token_number", "exchange_token"]:
-                        if k in j and j[k]:
-                            token = str(j[k])
-                            break
-                    real_sym = str(j.get("formatted_ins_name") or j.get("trading_symbol") or spaced).strip()
-                    # ✅ LOT - NIFTY = 65 FIXED! - Master la Enna Irundhalum - 65 thaan!
-                    # Master la 60 nu Irundha - Adhu Vera Index - Namba Match Strict-a Irundha - 65 thaan Varum!
-                    # Aana Safety ku - Master Lot-a Log la Kaatturen - Use Pannuradhu 65 mattum!
-                    master_lot = j.get("lot_size", "65")
-                    log(f"✅ symbolId Found: {token} | Real Symbol: [{real_sym}] | Master Lot: {master_lot} | Using Lot: 65 (NIFTY FIXED)")
-                    STORE["symbol_cache"][compact] = token
-                    STORE["spaced_cache"][compact] = real_sym
-                    STORE["lot_cache"][compact] = 65
-                    BOT["qty"] = 65
-                    return token, real_sym, 65
-                log(f"❌ No Match in {url} for {strike} {opt_type}")
-            except Exception as e:
-                log(f"Contract Master Err {url} {e}")
-    except Exception as e:
-        log(f"get_symbol_info Err {e}")
-    log(f"⚠️ symbolId Kedaikkala - Spaced Symbol + Lot 65 Use Pannuren!")
-    return None, spaced, 65
 
 @app.route('/')
 def home():
-    auth = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
-    s = STORE.get("session")
-    now = ist_now().strftime("%H:%M:%S IST - %d %b %Y")
-    return f"<h1>V75 - FULLY AUTO - ITM 1 - LOT 65 FIXED</h1><p>Server Time (IST): {now}</p><p>Session: {'YES' if s else 'ILLA'} | Expiry: {get_expiry()} (TUESDAY) | Lot: 65 FIXED</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot = 65 - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
-
-@app.route('/manual')
-def manual():
-    return """<h1>AuthCode</h1><form action='/exchange'><input name='authCode' placeholder='AuthCode' style='width:320px'><button>EXCHANGE</button></form><br><a href='/'>Home</a>"""
-
-@app.route('/callback')
-def callback():
-    c = request.args.get("authCode") or request.args.get("code")
-    return redirect(f"/exchange?authCode={c}") if c else "No Code <a href='/'>Home</a>"
-
-@app.route('/exchange')
-def exchange():
-    import requests
-    code = request.args.get("authCode", "").strip()
-    if not code:
-        return "<h1>AuthCode Illa</h1><a href='/'>Home</a>"
-    try:
-        REST = "https://ant.aliceblueonline.com/rest/AliceBlueAPIService"
-        cs = hashlib.sha256(f"{USER_ID}{code}{APP_SECRET}".encode()).hexdigest()
-        r = requests.post(f"{REST}/sso/getUserDetails", json={"checkSum": cs, "userId": USER_ID}, timeout=10)
-        sess = r.json().get("userSession")
-        if sess:
-            STORE["session"] = str(sess)
-            return "<h2 style='color:green'>SUCCESS!</h2><p><a href='/dashboard'><b>DASHBOARD - START BOT</b></a></p>"
-        return f"Session Illa {r.text[:400]} <a href='/'>Home</a>"
-    except Exception as e:
-        return f"Err {e} <a href='/'>Home</a>"
-
-def get_funds():
-    import requests
-    sess = STORE.get("session")
-    if not sess:
-        log("Funds Fail: Session Illa - LOGIN pannunga!")
-        return -1
-    try:
-        h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
-        r = requests.get("https://ant.aliceblueonline.com/open-api/od/v1/limits", headers=h, params={"userId": USER_ID}, timeout=7)
-        j = r.json()
-        log(f"Funds Raw: {str(j)[:200]}")
-        res = j.get("result", {})
-        if isinstance(res, list):
-            if len(res) > 0:
-                res = res[0]
-            else:
-                return 0
-        return float(res.get("tradingLimit", 0))
-    except Exception as e:
-        log(f"Funds Err: {e}")
-        return -1
-
-def get_ltp():
-    import requests
-    sess = STORE.get("session")
-    if not sess:
-        return None
-    try:
-        h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
-        r = requests.get("https://ant.aliceblueonline.com/open-api/od/v1/quotes", headers=h, params={"userId": USER_ID}, timeout=5)
-        return None
-    except:
-        return None
-
-def place_order_api(strike, opt_type, trans):
-    import requests
-    sess = STORE.get("session")
-    if not sess:
-        return {"error": "No Session"}
-    sid, real_sym, lot = get_symbol_info(strike, opt_type)
-    spaced, compact = build_symbol(strike, opt_type)
-    qty = 65
-    log(f"Using Qty: {qty} FIXED (NIFTY) | Token: {sid} | Symbol: [{real_sym}]")
-    tries = []
-    if sid:
-        tries.append((real_sym, sid, qty))
-    tries.append((real_sym, None, qty))
-    if compact != real_sym:
-        tries.append((compact, sid, qty))
-    h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json", "Accept": "application/json", "userId": USER_ID}
-    last = {"error": "No Try"}
-    for idx, (sym_try, sid_try, qty_try) in enumerate(tries):
-        payload = {"userId": USER_ID, "exch": "NFO", "pCode": "MIS", "price": 0, "priceType": "MARKET", "qty": qty_try, "ret": "DAY", "tradingSymbol": sym_try, "transType": trans, "trigPrice": 0, "orderTag": "VIJAYAN_ITM1", "complexity": "REGULAR", "discQty": 0}
-        if sid_try:
-            payload["symbolId"] = sid_try
-            payload["token"] = sid_try
-        log(f"TRY {idx+1} {trans} Payload: {payload}")
-        try:
-            r = requests.post("https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/placeOrder/executePlaceOrder", headers=h, json=payload, timeout=12)
-            log(f"TRY {idx+1} {trans} ORDER [{sym_try}] Qty:{qty_try} Status:{r.status_code} Resp:{r.text[:1000]}")
-            try:
-                j = r.json()
-            except:
-                j = {"raw": r.text[:1000], "status": r.status_code}
-            last = j
-            if r.status_code == 200 and ("Success" in str(j) or "orderId" in str(j).lower() or "Order" in str(j)):
-                log(f"✅ TRY {idx+1} SUCCESS!")
-                return j
-            if r.status_code != 400 or len(r.text.strip()) > 5:
-                return j
-        except Exception as e:
-            log(f"TRY {idx+1} Err {e}")
-            last = {"error": str(e)}
-    return last
-
-def place_buy(strike, opt_type):
-    return place_order_api(strike, opt_type, "BUY")
-
-def place_sell(strike, opt_type):
-    return place_order_api(strike, opt_type, "SELL")
-
-def bot_loop():
-    while True:
-        try:
-            if BOT["status"] == "RUNNING":
-                now = ist_now()
-                if not BOT.get("funds_checked"):
-                    f = get_funds()
-                    BOT["funds_checked"] = True
-                    if f == -1:
-                        log("Session Expire - Re-LOGIN pannunga!")
-                        BOT["funds"] = 0
-                    else:
-                        BOT["funds"] = f
-                        log(f"Funds: Rs.{BOT['funds']}")
-                if now.hour == 9 and 15 <= now.minute < 20 and not BOT["candle_locked"]:
-                    ltp = get_ltp()
-                    if ltp:
-                        BOT["ltp"] = ltp
-                        if BOT["high"] is None or ltp > BOT["high"]:
-                            BOT["high"] = ltp
-                        if BOT["low"] is None or ltp < BOT["low"]:
-                            BOT["low"] = ltp
-                        log(f"MARKING... High:{BOT['high']} Low:{BOT['low']} LTP:{ltp}")
-                    else:
-                        log("MARKING... Waiting for Live Price - Quote Connect Pannanum")
-                if now.hour == 9 and now.minute >= 20 and not BOT["candle_locked"] and BOT["high"]:
-                    BOT["candle_locked"] = True
-                    log(f"CANDLE LOCKED ✅ High:{BOT['high']} Low:{BOT['low']} - Waiting for Breakout...")
-                if BOT["candle_locked"] and not BOT["trade_done"]:
-                    ltp = get_ltp()
-                    if ltp:
-                        BOT["ltp"] = ltp
-                        if ltp > BOT["high"]:
-                            atm = int(round(ltp / 50) * 50)
-                            strike = atm - 50
-                            log(f"🚀 BREAKOUT! LTP {ltp} > High {BOT['high']} - ITM 1 CE BUY {strike}CE (ATM {atm} - 50)")
-                            res = place_buy(strike, "CE")
-                            BOT["entry"] = ltp; BOT["type"] = "CE"; BOT["strike"] = strike; BOT["sl"] = ltp - 30; BOT["trade_done"] = True
-                        elif ltp < BOT["low"]:
-                            atm = int(round(ltp / 50) * 50)
-                            strike = atm + 50
-                            log(f"🔻 BREAKDOWN! LTP {ltp} < Low {BOT['low']} - ITM 1 PE BUY {strike}PE (ATM {atm} + 50)")
-                            res = place_buy(strike, "PE")
-                            BOT["entry"] = ltp; BOT["type"] = "PE"; BOT["strike"] = strike; BOT["sl"] = ltp - 30; BOT["trade_done"] = True
-                if BOT["trade_done"] and BOT["entry"] and BOT["ltp"]:
-                    profit = BOT["ltp"] - BOT["entry"]
-                    new_sl = BOT["entry"] - 30 + profit
-                    if new_sl > BOT["sl"]:
-                        BOT["sl"] = round(new_sl, 2)
-                        log(f"Trailing SL Moved -> {BOT['sl']} Profit:{profit:.2f}")
-                    BOT["pnl"] = round(profit * 65, 2)
-                    if BOT["ltp"] <= BOT["sl"]:
-                        log(f"🛑 SL HIT! Auto Exit @ {BOT['ltp']}")
-                        place_sell(BOT["strike"], BOT["type"])
-                        BOT["status"] = "CLOSED"
-                if now.hour == 15 and now.minute >= 15 and BOT["trade_done"] and BOT["status"] == "RUNNING":
-                    log("⏰ 3:15 TIME EXIT - Auto Square Off!")
-                    place_sell(BOT["strike"], BOT["type"])
-                    BOT["status"] = "CLOSED"
-            time.sleep(5)
-        except Exception as e:
-            log(f"Bot Err {e}")
-            time.sleep(5)
-
-threading.Thread(target=bot_loop, daemon=True).start()
+    return f"<h1>V77 - CHECK NOW</h1><p><a href='/check_symbol'><button style='padding:15px;background:green;color:white'>🔍 CHECK NOW - 24450 CE Symbol Enna?</button></a></p><p><a href='/dashboard'>Dashboard</a></p>"
 
 @app.route('/dashboard')
 def dashboard():
-    b = BOT
-    logs = "<br>".join(b["logs"][:30])
-    now_str = ist_now().strftime("%H:%M:%S IST - %d %b %Y")
-    return f"""
-    <h1>VIJAYAN ALGO - FULLY AUTO - ITM 1 - NIFTY MOMENTUM</h1>
-    <p><b>Server Time (IST):</b> {now_str} | <b>Funds:</b> Rs.{b['funds']} | <b>Mode:</b> {b['mode']} | <b>Status:</b> {b['status']} | <b>Expiry:</b> {get_expiry()} (TUESDAY) | <b>Lot:</b> 65 FIXED</p>
-    <table border=1 cellpadding=8><tr><th>Strategy</th><th>Status</th><th>PNL</th><th>Broker</th></tr>
-    <tr><td>VIJAYAN NIFTY MOMENTUM - 1 LOT = 65 - ITM 1 - 5MIN BREAKOUT - AUTO</td><td>{b['status']}</td><td>Rs.{b['pnl']}</td><td>ALICEBLUE</td></tr></table>
-    <h2>Live Status</h2>
-    <p><b>First Candle High:</b> {b['high']} {'✅ LOCKED' if b['candle_locked'] else '🔴 MARKING...'} | <b>Low:</b> {b['low']} {'✅ LOCKED' if b['candle_locked'] else '🔴 MARKING...'}</p>
-    <p><b>Entry:</b> {b['entry']} | <b>Type:</b> {b['strike']} {b['type']} | <b>LTP:</b> {b['ltp']} | <b>SL:</b> {b['sl']} (30 Points + Trailing 1)</p>
-    <p><b>Trade Done:</b> {b['trade_done']} | <b>Strike Logic:</b> CE = ATM - 50 | PE = ATM + 50</p>
-    <hr><p><a href='/bot/start'><button style='background:green;color:white;padding:12px'>▶️ START BOT - FULLY AUTO - ITM 1</button></a>
-    <a href='/bot/stop'><button style='background:red;color:white;padding:12px'>⏹️ STOP BOT</button></a>
-    <a href='/bot/exit'><button style='background:orange;padding:12px'>🚪 EXIT ALL</button></a></p>
-    <p><a href='/bot/testcandle'><button style='background:blue;color:white;padding:12px'>🧪 TEST MODE - Fake Candle Test</button></a>
-    <a href='/bot/testorder'><button style='background:purple;color:white;padding:12px'>🧪 IPPAVE TEST ORDER - 24450 CE - Real API Call!</button></a>
-    <a href='/debug'><button style='padding:12px'>🔍 DEBUG - Session / Funds Check</button></a></p>
-    <hr><h2>Logs - Bot Enna Pannudhu?</h2><p>{logs}</p>
-    <p><a href='/dashboard'>🔄 Refresh</a> | <a href='/'>Home</a></p>
-    """
+    logs = "<br>".join(BOT["logs"][:80])
+    return f"<h1>CHECK NOW</h1><p><a href='/check_symbol'><button style='padding:12px;background:green;color:white'>🔍 CHECK NOW</button></a></p><hr><h2>Logs</h2><p>{logs}</p><p><a href='/dashboard'>Refresh</a></p>"
 
-@app.route('/bot/start')
-def start():
-    BOT["status"] = "RUNNING"
-    BOT["high"] = None; BOT["low"] = None; BOT["candle_locked"] = False
-    BOT["trade_done"] = False; BOT["entry"] = None; BOT["pnl"] = 0
-    BOT["funds"] = 0; BOT["funds_checked"] = False
-    BOT["sl"] = None; BOT["ltp"] = None; BOT["strike"] = None; BOT["type"] = None
-    log("BOT STARTED - FULLY AUTO - ITM 1 - Morning 9:15 la Mark pannum!")
-    return redirect("/dashboard")
-
-@app.route('/bot/stop')
-def stop():
-    BOT["status"] = "STOPPED"
-    log("BOT STOPPED")
-    return redirect("/dashboard")
-
-@app.route('/bot/exit')
-def exitall():
+# ---------- CHECK NOW ✅ - Expiry Guess Illa - Strike 24450 CE nu Mattum Thedu! ----------
+@app.route('/check_symbol')
+def check_symbol():
     import requests
-    sess = STORE.get("session")
-    if sess:
-        h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
-        try:
-            r = requests.post("https://ant.aliceblueonline.com/open-api/od/v1/orders/positions/sqroff", headers=h, json={"userId": USER_ID}, timeout=8)
-            log(f"EXIT ALL: {r.text[:200]}")
-        except Exception as e:
-            log(f"Exit Err {e}")
-    BOT["status"] = "CLOSED"
+    log("🔍 CHECK NOW START - Strike 24450 CE - Expiry Guess Illa!")
+    try:
+        r = requests.get("https://v2api.aliceblueonline.com/restpy/contract_master?exch=NFO", timeout=25)
+        log(f"Contract Master Status:{r.status_code} Len:{len(r.text)}")
+        txt = r.text
+        found = []
+        total = 0
+        for line in txt.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            total += 1
+            try:
+                j = json.loads(line)
+            except:
+                continue
+            # 1. OPTIDX mattum
+            if j.get("instrument_type") != "OPTIDX":
+                continue
+            # 2. CE mattum
+            if str(j.get("option_type", "")).upper() != "CE":
+                continue
+            # 3. Strike 24450 mattum
+            try:
+                if int(float(str(j.get("strike_price", "0")))) != 24450:
+                    continue
+            except:
+                continue
+            # 4. NIFTY mattum - BANKNIFTY / FINNIFTY / MIDCP - Ellam SKIP!
+            fname = str(j.get("formatted_ins_name", "")).strip()
+            if not fname.upper().startswith("NIFTY "):
+                continue
+            # Kedaichiduchu!
+            # Expiry Timestamp-a Date-a Maathu!
+            try:
+                exp_ms = int(j.get("expiry_date", 0))
+                exp_dt = datetime.fromtimestamp(exp_ms/1000, tz=IST)
+                exp_str = exp_dt.strftime("%d %b %Y - %A - %d%b%y")
+            except Exception as e:
+                exp_str = f"Expiry Decode Fail {j.get('expiry_date')} Err {e}"
+            # Token - Ella Field-um Paaru!
+            token = j.get("token") or j.get("instrument_token") or j.get("Token") or j.get("exchange_token") or "TOKEN FIELD ILLA"
+            lot = j.get("lot_size", "LOT ILLA")
+            log(f"✅ FOUND! Name:[{fname}] | Expiry:{exp_str} | Token:{token} | Lot:{lot} | Full:{str(j)[:600]}")
+            found.append(j)
+            if len(found) >= 10:
+                break
+        log(f"Total JSON Lines Checked: {total} | NIFTY 24450 CE Found: {len(found)}")
+        if len(found) == 0:
+            log("❌ 24450 CE - NIFTY la Illa! - Strike / Expiry Vera? - Adutha Check: 24500 CE Paakren!")
+            # Fallback - 24500 CE Check pannu - Adhu Irukka?
+            for line in txt.splitlines():
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    j = json.loads(line)
+                except:
+                    continue
+                if j.get("instrument_type") != "OPTIDX":
+                    continue
+                if str(j.get("option_type", "")).upper() != "CE":
+                    continue
+                try:
+                    if int(float(str(j.get("strike_price", "0")))) != 24500:
+                        continue
+                except:
+                    continue
+                fname = str(j.get("formatted_ins_name", "")).strip()
+                if not fname.upper().startswith("NIFTY "):
+                    continue
+                log(f"Fallback 24500 CE Found: [{fname}] Full:{str(j)[:400]}")
+                break
+    except Exception as e:
+        log(f"CHECK Err {e}")
     return redirect("/dashboard")
-
-@app.route('/bot/testcandle')
-def testcandle():
-    BOT["high"] = 24510; BOT["low"] = 24460; BOT["candle_locked"] = True; BOT["ltp"] = 24520
-    log("🧪 TEST MODE - ITM 1 Test!")
-    log("🧪 LTP 24520 - ATM 24500 - ITM 1 CE = 24450 CE")
-    BOT["entry"] = 24520; BOT["type"] = "CE"; BOT["strike"] = 24450; BOT["sl"] = 24520 - 30; BOT["trade_done"] = True
-    log(f"🧪 TEST ENTRY ITM 1 CE 24450 @ 24520 SL:{BOT['sl']} - Trailing Test Ready!")
-    return redirect("/dashboard")
-
-@app.route('/bot/testorder')
-def testorder():
-    sess = STORE.get("session")
-    if not sess:
-        log("TEST ORDER Fail: LOGIN pannunga!")
-        return redirect("/dashboard")
-    strike = int(request.args.get("strike", 24450))
-    otype = request.args.get("type", "CE")
-    log(f"🧪 IPPAVE TEST ORDER - BUY {strike}{otype} - 1 Lot = 65 - Real API Call!")
-    res = place_buy(strike, otype)
-    log(f"🧪 TEST ORDER Final Resp: {str(res)[:800]}")
-    return redirect("/dashboard")
-
-@app.route('/debug')
-def debug():
-    import requests
-    sess = STORE.get("session")
-    out = [f"<h1>DEBUG</h1><p>IST Now: {ist_now().strftime('%H:%M:%S IST - %d %b %Y')}</p><p>Session: {'YES - ' + sess[:20] + '...' if sess else 'ILLA - LOGIN pannunga!'}</p><p>Expiry: {get_expiry()} (TUESDAY) | Test Symbol Spaced: {build_symbol(24450, 'CE')[0]} | Lot: 65 FIXED</p>"]
-    if sess:
-        h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
-        try:
-            r = requests.get("https://ant.aliceblueonline.com/open-api/od/v1/limits", headers=h, params={"userId": USER_ID}, timeout=7)
-            out.append(f"<p><b>Limits Status:</b> {r.status_code}</p><p><b>Raw:</b> {r.text[:600]}</p>")
-        except Exception as e:
-            out.append(f"<p>Err {e}</p>")
-    out.append("<p><a href='/dashboard'>Dashboard</a> | <a href='/'>Home</a></p>")
-    return "<br>".join(out)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
