@@ -42,7 +42,7 @@ def log(m):
 def home():
     auth = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
     s = STORE.get("session")
-    return f"<h1>V64 - FULLY AUTO - ITM 1 BOT</h1><p>Session: {'YES' if s else 'ILLA'}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
+    return f"<h1>V65 - FULLY AUTO - ITM 1 - TEST ORDER READY</h1><p>Session: {'YES' if s else 'ILLA'}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
 
 @app.route('/manual')
 def manual():
@@ -84,7 +84,6 @@ def get_funds():
         j = r.json()
         log(f"Funds Raw: {str(j)[:200]}")
         res = j.get("result", {})
-        # FIX: result List-a Vandha - First Item-a Edu!
         if isinstance(res, list):
             if len(res) > 0:
                 res = res[0]
@@ -116,7 +115,7 @@ def place_buy(strike, opt_type):
     payload = {"userId": USER_ID, "exchange": "NFO", "tradingSymbol": f"NIFTY{strike}{opt_type}", "quantity": 65, "transactionType": "BUY", "orderType": "MARKET", "productType": "INTRADAY", "validity": "DAY", "price": "0", "triggerPrice": "0", "disclosedQuantity": "0"}
     try:
         r = requests.post("https://ant.aliceblueonline.com/open-api/od/v1/orders/place", headers=h, json=payload, timeout=10)
-        log(f"BUY ORDER {strike}{opt_type} Resp:{r.text[:400]}")
+        log(f"BUY ORDER {strike}{opt_type} Resp:{r.text[:500]}")
         return r.json()
     except Exception as e:
         log(f"Order Err {e}")
@@ -131,7 +130,7 @@ def place_sell(strike, opt_type):
     payload = {"userId": USER_ID, "exchange": "NFO", "tradingSymbol": f"NIFTY{strike}{opt_type}", "quantity": 65, "transactionType": "SELL", "orderType": "MARKET", "productType": "INTRADAY", "validity": "DAY", "price": "0", "triggerPrice": "0", "disclosedQuantity": "0"}
     try:
         r = requests.post("https://ant.aliceblueonline.com/open-api/od/v1/orders/place", headers=h, json=payload, timeout=10)
-        log(f"SELL ORDER {strike}{opt_type} Resp:{r.text[:400]}")
+        log(f"SELL ORDER {strike}{opt_type} Resp:{r.text[:500]}")
         return r.json()
     except Exception as e:
         log(f"Sell Err {e}")
@@ -143,7 +142,6 @@ def bot_loop():
         try:
             if BOT["status"] == "RUNNING":
                 now = datetime.now()
-                # 1. FUNDS - 1 Time mattum
                 if not BOT.get("funds_checked"):
                     f = get_funds()
                     BOT["funds_checked"] = True
@@ -153,7 +151,6 @@ def bot_loop():
                     else:
                         BOT["funds"] = f
                         log(f"Funds: Rs.{BOT['funds']}")
-                # 2. 9:15 - 9:20 - AUTO MARK FIRST CANDLE
                 if now.hour == 9 and 15 <= now.minute < 20 and not BOT["candle_locked"]:
                     ltp = get_ltp()
                     if ltp:
@@ -165,28 +162,25 @@ def bot_loop():
                         log(f"MARKING... High:{BOT['high']} Low:{BOT['low']} LTP:{ltp}")
                     else:
                         log("MARKING... Waiting for Live Price - Quote Connect Pannanum")
-                # 3. 9:20 - LOCK CANDLE
                 if now.hour == 9 and now.minute >= 20 and not BOT["candle_locked"] and BOT["high"]:
                     BOT["candle_locked"] = True
                     log(f"CANDLE LOCKED ✅ High:{BOT['high']} Low:{BOT['low']} - Waiting for Breakout...")
-                # 4. BREAKOUT CHECK - ITM 1 - 9:20 to 3:15
                 if BOT["candle_locked"] and not BOT["trade_done"]:
                     ltp = get_ltp()
                     if ltp:
                         BOT["ltp"] = ltp
                         if ltp > BOT["high"]:
                             atm = int(round(ltp / 50) * 50)
-                            strike = atm - 50  # CE ku ITM 1 - 1 Strike Keela
+                            strike = atm - 50
                             log(f"🚀 BREAKOUT! LTP {ltp} > High {BOT['high']} - ITM 1 CE BUY {strike}CE (ATM {atm} - 50)")
                             res = place_buy(strike, "CE")
                             BOT["entry"] = ltp; BOT["type"] = "CE"; BOT["strike"] = strike; BOT["sl"] = ltp - 30; BOT["trade_done"] = True
                         elif ltp < BOT["low"]:
                             atm = int(round(ltp / 50) * 50)
-                            strike = atm + 50  # PE ku ITM 1 - 1 Strike Mela
+                            strike = atm + 50
                             log(f"🔻 BREAKDOWN! LTP {ltp} < Low {BOT['low']} - ITM 1 PE BUY {strike}PE (ATM {atm} + 50)")
                             res = place_buy(strike, "PE")
                             BOT["entry"] = ltp; BOT["type"] = "PE"; BOT["strike"] = strike; BOT["sl"] = ltp - 30; BOT["trade_done"] = True
-                # 5. TRAILING SL - 1 Point ku 1 Point
                 if BOT["trade_done"] and BOT["entry"] and BOT["ltp"]:
                     profit = BOT["ltp"] - BOT["entry"]
                     new_sl = BOT["entry"] - 30 + profit
@@ -198,7 +192,6 @@ def bot_loop():
                         log(f"🛑 SL HIT! Auto Exit @ {BOT['ltp']}")
                         place_sell(BOT["strike"], BOT["type"])
                         BOT["status"] = "CLOSED"
-                # 6. 3:15 - TIME EXIT
                 if now.hour == 15 and now.minute >= 15 and BOT["trade_done"] and BOT["status"] == "RUNNING":
                     log("⏰ 3:15 TIME EXIT - Auto Square Off!")
                     place_sell(BOT["strike"], BOT["type"])
@@ -227,7 +220,8 @@ def dashboard():
     <hr><p><a href='/bot/start'><button style='background:green;color:white;padding:12px'>▶️ START BOT - FULLY AUTO - ITM 1</button></a>
     <a href='/bot/stop'><button style='background:red;color:white;padding:12px'>⏹️ STOP BOT</button></a>
     <a href='/bot/exit'><button style='background:orange;padding:12px'>🚪 EXIT ALL</button></a></p>
-    <p><a href='/bot/testcandle'><button style='background:blue;color:white;padding:12px'>🧪 TEST MODE - ITM 1 Test - Evening la Test Pannalam!</button></a>
+    <p><a href='/bot/testcandle'><button style='background:blue;color:white;padding:12px'>🧪 TEST MODE - Fake Candle Test</button></a>
+    <a href='/bot/testorder'><button style='background:purple;color:white;padding:12px'>🧪 IPPAVE TEST ORDER - 24450 CE - Real API Call!</button></a>
     <a href='/debug'><button style='padding:12px'>🔍 DEBUG - Session / Funds Check</button></a></p>
     <hr><h2>Logs - Bot Enna Pannudhu?</h2><p>{logs}</p>
     <p><a href='/dashboard'>🔄 Refresh</a> | <a href='/'>Home</a></p>
@@ -270,6 +264,19 @@ def testcandle():
     log("🧪 LTP 24520 - ATM 24500 - ITM 1 CE = 24450 CE")
     BOT["entry"] = 24520; BOT["type"] = "CE"; BOT["strike"] = 24450; BOT["sl"] = 24520 - 30; BOT["trade_done"] = True
     log(f"🧪 TEST ENTRY ITM 1 CE 24450 @ 24520 SL:{BOT['sl']} - Trailing Test Ready!")
+    return redirect("/dashboard")
+
+@app.route('/bot/testorder')
+def testorder():
+    sess = STORE.get("session")
+    if not sess:
+        log("TEST ORDER Fail: LOGIN pannunga!")
+        return redirect("/dashboard")
+    strike = int(request.args.get("strike", 24450))
+    otype = request.args.get("type", "CE")
+    log(f"🧪 IPPAVE TEST ORDER - BUY {strike}{otype} - 1 Lot - Real API Call!")
+    res = place_buy(strike, otype)
+    log(f"🧪 TEST ORDER Resp: {str(res)[:500]}")
     return redirect("/dashboard")
 
 @app.route('/debug')
