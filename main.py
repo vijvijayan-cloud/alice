@@ -9,62 +9,76 @@ APP_ID=clean("ALICE_APP_ID")
 APP_SECRET=clean("ALICE_APP_SECRET")
 DOB_YEAR=clean("ALICE_YEAR") or clean("ALICE_DOB_YEAR") or clean("ALICE_2FA")
 TOTP_SECRET=clean("ALICE_TOTP_SECRET")
-LOGS=[]
+HOST="https://ant.aliceblueonline.com/rest/AliceBlueAPIService"
+# twoFA ku possible ella URL-um - Oru URL work aana podhum!
+CANDIDATES=[
+  "sso/validAnswer",
+  "sso/validateAnswer",
+  "sso/validUserDetails",
+  "sso/verifyAnswer",
+  "sso/checkAnswer",
+  "customer/validAnswer",
+  "customer/validateAnswer",
+  "customer/validUserDetails",
+  "sso/validanswer",
+  "sso/validate2FA",
+  "sso/verify2FA",
+  "customer/verifyAnswer",
+]
 @app.route('/')
 def home():
-    return f"<h1>V36 - SPY SDK CALLS</h1><p>User:{USER_ID} DOB:{DOB_YEAR}</p><p><a href='/login'><b>LOGIN - SPY</b></a></p>"
+    return f"<h1>V37 - FIND CORRECT twoFA URL</h1><p>User:{USER_ID} DOB:{DOB_YEAR}</p><p><a href='/login'><b>TRY ALL twoFA URLs</b></a></p>"
 @app.route('/login')
 def login():
-    out=[]; LOGS.clear()
+    out=[]
     try:
         import pyotp
         try: totp_now=pyotp.TOTP(TOTP_SECRET).now() if TOTP_SECRET else None
         except: totp_now=None
         out.append(f"USER:{USER_ID} APP:{APP_ID} DOB:{DOB_YEAR} TOTP:{totp_now}")
         import alice_blue.alice_blue as mod
-        # 1. SDK Login Method Source-a full-a kaatu - Line 180-250
-        try:
-            src=inspect.getsource(mod.AliceBlue.login_and_get_sessionID)
-            out.append(f"<h3>LOGIN METHOD FULL SOURCE:</h3><pre>{src[:7000]}</pre>")
-        except Exception as e: out.append(f"Source fail {e}")
-        # 2. SPY - SDK enna URL-a koopduvudhu nu paakkanum - requests.post-a intercept pannu
-        orig_post = mod.requests.post
-        orig_get = mod.requests.get
-        def spy_post(url, *a, **kw):
-            r = orig_post(url, *a, **kw)
-            txt = ""
-            try: txt = r.text[:800]
-            except: txt = "<no text>"
-            LOGS.append(f"<b>POST {url}</b> Status:{r.status_code} Body:{txt} Kw-Keys:{list(kw.keys())} Data:{str(kw.get('data') or kw.get('json'))[:300]}")
-            return r
-        def spy_get(url, *a, **kw):
-            r = orig_get(url, *a, **kw)
-            txt=""
-            try: txt=r.text[:500]
-            except: pass
-            LOGS.append(f"<b>GET {url}</b> Status:{r.status_code} Body:{txt}")
-            return r
-        mod.requests.post = spy_post
-        mod.requests.get = spy_get
-        # 3. SDK Method-a koopdu - Spy log pannum
-        for label, tfa in [("DOB",DOB_YEAR)]:
-            if not tfa: continue
-            out.append(f"<b>=== TRY {label}={tfa} - SPY ON ===</b>")
+        orig_urls=dict(mod.AliceBlue_urls) if hasattr(mod,"AliceBlue_urls") else {}
+        out.append(f"Original SDK URLs: {orig_urls}")
+        # TOTP-a kooda try pannuvom - DOB + TOTP
+        tfas=[("DOB",DOB_YEAR)]
+        if totp_now: tfas.append(("TOTP",totp_now))
+        for cand in CANDIDATES:
+            full=f"{HOST}/{cand}"
+            out.append(f"<b>=== CANDIDATE: {cand} ===</b>")
+            # SDK URLs-a patch pannu
             try:
-                obj = mod.AliceBlue.__new__(mod.AliceBlue)
-                sess = obj.login_and_get_sessionID(USER_ID, PASSWORD, str(tfa), APP_ID, APP_SECRET)
-                out.append(f"Returned: {str(sess)[:100] if sess else 'NONE'}")
-                if sess and len(str(sess))>10:
-                    out.append(f"<h2 style='color:green'>SUCCESS via {label}</h2><p>Full: {sess}</p>")
+                mod.AliceBlue_urls['twoFA']=full
+                # AliceBlue class la vera dict irundha adhayum patch pannu
+                if hasattr(mod.AliceBlue,"AliceBlue_urls"):
+                    try: mod.AliceBlue.AliceBlue_urls['twoFA']=full
+                    except: pass
             except Exception as e:
-                out.append(f"Call Err {label}: {e}")
-                out.append(f"<pre>{traceback.format_exc()[:3000]}</pre>")
-        mod.requests.post = orig_post
-        mod.requests.get = orig_get
-        out.append(f"<h2>SPY LOG - SDK Enna URL-a Koopduchunu Paaru:</h2>")
-        for l in LOGS:
-            out.append(l)
-        out.append("<b>Idhula paaru - Edha URL la Status 404 / Empty Body vandhuchu nu - Adhu thaan thappu URL!</b>")
+                out.append(f"Patch fail {e}")
+            for label, tfa in tfas:
+                if not tfa: continue
+                try:
+                    obj = mod.AliceBlue.__new__(mod.AliceBlue)
+                    sess = obj.login_and_get_sessionID(USER_ID, PASSWORD, str(tfa), APP_ID, APP_SECRET)
+                    out.append(f"  {label}={tfa} -> Returned: {str(sess)[:80] if sess else 'NONE'}")
+                    if sess and len(str(sess))>10:
+                        out.append(f"<h2 style='color:green'>SUCCESS! Correct twoFA URL = {full} via {label}</h2><p>Full Session: {sess}</p>")
+                        try:
+                            real = mod.AliceBlue(username=USER_ID, session_id=sess)
+                            prof = real.get_profile()
+                            out.append(f"<h3>Profile: {str(prof)[:800]}</h3>")
+                        except Exception as e:
+                            out.append(f"Profile Err (parava illa): {e}")
+                        return "<br>".join(out) + "<br><a href='/'>Home</a>"
+                except Exception as e:
+                    msg=str(e)[:300]
+                    out.append(f"  {label} -> Fail: {msg}")
+                    # 404-a illa vera error-a nu paaru - 404 illa na, URL correct-a irukkalam, 2FA thappu-nu artham
+                    if "404" not in msg and "Expecting value" not in msg and "Not Found" not in msg:
+                        out.append(f"  *** {cand} - 404 ILLA! Vera error - Idhu correct URL-a irukkalam! Full: {traceback.format_exc()[:1500]}")
+        # Original-a restore pannu
+        try: mod.AliceBlue_urls.update(orig_urls)
+        except: pass
+        out.append("<b>LOGIN FAIL - Ella candidate-um 404 / fail</b><p>Idhu vandha, twoFA URL vera host-la irukku nu artham - Adutha step: Host-a theduvom</p>")
     except Exception as e:
         out.append(f"Err {e} {traceback.format_exc()[:3000]}")
     return "<br>".join(out) + "<br><a href='/'>Home</a>"
