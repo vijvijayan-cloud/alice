@@ -1,6 +1,5 @@
-Flask==3.0.0
-requests==2.31.0
-yfinance==0.2.36
-alice_blue
-pyotp==2.9.0
-pycryptodome==3.19.0
+Flask
+alice-blue
+pyotp
+requests
+pycryptodome
