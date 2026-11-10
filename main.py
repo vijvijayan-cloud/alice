@@ -1,4 +1,4 @@
-import os, traceback
+import os, traceback, json, hashlib
 from flask import Flask
 app = Flask(__name__)
 def clean(n):
@@ -10,70 +10,69 @@ APP_SECRET=clean("ALICE_APP_SECRET")
 DOB_YEAR=clean("ALICE_YEAR") or clean("ALICE_DOB_YEAR") or clean("ALICE_2FA")
 @app.route('/')
 def home():
-    return f"<h1>V47 - 405 BREAK - Method Kandupidi</h1><p>User:{USER_ID} DOB:{DOB_YEAR} APP:{APP_ID}</p><p><a href='/methods'><b>1. METHODS - sso/validAnswer - GET / POST-FORM / POST-JSON - Edhu 405 Illa?</b></a></p><p><a href='/full'><b>2. FULL - WebLogin + validAnswer - Same Session (Cookie) vachu Try</b></a></p>"
-@app.route('/methods')
-def methods():
+    return f"<h1>V49 - REST + COOKIE - Correct Combination</h1><p>User:{USER_ID} DOB:{DOB_YEAR} APP:{APP_ID}</p><p><a href='/combo'><b>1. COMBO - REST Host + Cookie vachu - Ella 2FA Path-um Try</b></a></p>"
+@app.route('/combo')
+def combo():
     import requests
-    out=["<h1>METHODS - Root Host - sso/validAnswer</h1>"]
-    # Root host thaan LIVE - rest/ prefix ILLA!
-    base="https://ant.aliceblueonline.com"
-    payload={"answer1":str(DOB_YEAR),"sCount":"1","sIndex":"1","userId":USER_ID,"vendor":APP_ID}
-    tests=[
-        ("GET-query", "GET", f"{base}/sso/validAnswer", {"params":payload}),
-        ("GET-no-payload", "GET", f"{base}/sso/validAnswer", {}),
-        ("POST-JSON", "POST", f"{base}/sso/validAnswer", {"json":payload}),
-        ("POST-FORM", "POST", f"{base}/sso/validAnswer", {"data":payload}),
-        ("POST-FORM-json-header", "POST", f"{base}/sso/validAnswer", {"data":payload, "headers":{"Content-Type":"application/x-www-form-urlencoded"}}),
-        ("PUT-JSON", "PUT", f"{base}/sso/validAnswer", {"json":payload}),
-        ("POST-JSON-no-vendor", "POST", f"{base}/sso/validAnswer", {"json":{"answer1":str(DOB_YEAR),"userId":USER_ID}}),
-        ("OPTIONS", "OPTIONS", f"{base}/sso/validAnswer", {}),
-    ]
-    for name,method,url,kw in tests:
-        try:
-            r=requests.request(method, url, timeout=7, **kw)
-            txt=(r.text or "")
-            is_html="<html" in txt.lower()
-            allow=r.headers.get("Allow","")
-            mark="✅" if (r.status_code not in (404,405) and not is_html) else ("⚠️" if r.status_code==405 else "❌")
-            out.append(f"<p>{mark} <b>{name}</b> Status:{r.status_code} Len:{len(txt)} Allow:{allow} Body:{txt[:500].replace('<','&lt;')}</p>")
-            if r.status_code==200 and not is_html:
-                out.append(f"<h2 style='color:green'>FOUND! Method: {name} Body: {txt[:600]}</h2>")
-        except Exception as e: out.append(f"<p>❌ {name} Err:{e}</p>")
-    return "<br>".join(out)+"<br><a href='/'>Home</a> | <a href='/full'>Full</a>"
-@app.route('/full')
-def full():
-    import requests, json
-    out=["<h1>FULL - WebLogin Cookie vachu - validAnswer</h1>"]
+    from alice_blue.alice_blue import CryptoJsAES
+    out=["<h1>COMBO - REST + Cookie</h1>"]
     try:
         s=requests.Session()
-        host_root="https://ant.aliceblueonline.com"
-        # Step 1 - getEncKey - Root host la? Rest host la? Rendum try - WebLogin enga work aagudhu nu paappom
-        # Munnadi rest host la webLogin work aachu - Adha Session la pannuvom
-        out.append("<h3>Step 1 - getEncKey (rest host)</h3>")
-        r1=s.post("https://ant.aliceblueonline.com/rest/AliceBlueAPIService/customer/getEncryptionKey", headers={"Content-Type":"application/json"}, data=json.dumps({"userId":USER_ID}), timeout=10)
-        out.append(f"Status:{r1.status_code} Body:{r1.text[:400]} Cookies:{dict(s.cookies)}")
+        s.headers.update({"User-Agent":"Mozilla/5.0","Accept":"application/json"})
+        REST="https://ant.aliceblueonline.com/rest/AliceBlueAPIService"
+        # Step 1 - getEncKey
+        r1=s.post(f"{REST}/customer/getEncryptionKey", json={"userId":USER_ID}, timeout=10)
+        out.append(f"<p><b>Step1 getEncKey</b> Status:{r1.status_code} Body:{r1.text[:400]} Cookies:{dict(s.cookies)}</p>")
         try: encKey=r1.json().get("encKey")
         except: encKey=None
-        # Step 2 - webLogin - Rest host
-        if encKey:
-            from alice_blue.alice_blue import CryptoJsAES
-            enc_pass=CryptoJsAES.encrypt(PASSWORD.encode(), encKey.encode()).decode()
-            checksum=__import__("hashlib").sha256(USER_ID.encode()).hexdigest()
-            data={"userId":USER_ID,"password":enc_pass,"checksum":checksum}
-            out.append("<h3>Step 2 - webLogin (rest host) - Session Cookie save</h3>")
-            r2=s.post("https://ant.aliceblueonline.com/rest/AliceBlueAPIService/customer/webLogin", json=data, timeout=10)
-            out.append(f"Status:{r2.status_code} Body:{r2.text[:600]} Cookies:{dict(s.cookies)} Headers:{dict(r2.headers)}")
-            # Step 3 - validAnswer - ROOT host - Same Session + Cookies + GET + POST-FORM + POST-JSON
-            payload={"answer1":str(DOB_YEAR),"sCount":"1","sIndex":"1","userId":USER_ID,"vendor":APP_ID}
-            for name,kw in [("GET-query",{"params":payload}),("POST-JSON",{"json":payload}),("POST-FORM",{"data":payload})]:
-                try:
-                    r3=s.request("GET" if "GET" in name else "POST", f"{host_root}/sso/validAnswer", timeout=10, **kw)
-                    out.append(f"<p><b>{name} + Cookies</b> Status:{r3.status_code} Body:{r3.text[:500].replace('<','&lt;')}</p>")
-                    if r3.status_code==200 and "<html" not in r3.text.lower():
-                        out.append(f"<h2 style='color:green'>FOUND! {name} Body: {r3.text[:600]}</h2>")
-                except Exception as e: out.append(f"<p>{name} Err:{e}</p>")
-        else:
-            out.append("<b>encKey Illa</b>")
+        if not encKey:
+            return "<br>".join(out)+"<br><b>encKey Illa</b>"
+        # Step 2 - webLogin - FULL JSON
+        enc_pass=CryptoJsAES.encrypt(PASSWORD.encode(), encKey.encode()).decode()
+        checksum=hashlib.sha256(USER_ID.encode()).hexdigest()
+        data={"userId":USER_ID,"password":enc_pass,"checksum":checksum}
+        r2=s.post(f"{REST}/customer/webLogin", json=data, timeout=10)
+        out.append(f"<h3>Step2 webLogin FULL</h3><p>Status:{r2.status_code}</p><p>Cookies:{dict(s.cookies)}</p><p>Headers:{dict(r2.headers)}</p><pre>{r2.text[:3000].replace('<','&lt;')}</pre>")
+        try:
+            j2=r2.json()
+            out.append(f"<p><b>webLogin Keys: {list(j2.keys()) if isinstance(j2,dict) else type(j2)}</b></p>")
+            # Adhula URL / Token / Next Step irukka?
+            for k,v in j2.items() if isinstance(j2,dict) else []:
+                out.append(f"<p>Key: {k} = {str(v)[:500]}</p>")
+        except Exception as e: out.append(f"<p>webLogin JSON parse Err: {e}</p>")
+        # Step 3 - 2FA - REST + Cookie - Ella Path-um
+        out.append("<h3>Step3 - 2FA - REST + Cookie</h3>")
+        payload={"answer1":str(DOB_YEAR),"sCount":"1","sIndex":"1","userId":USER_ID,"vendor":APP_ID}
+        cands=[
+            "sso/validAnswer","sso/validateAnswer","sso/verifyAnswer","sso/validUserDetails",
+            "customer/validAnswer","customer/validateAnswer","customer/verifyAnswer",
+            "customer/validUserDetails","sso/validate2FA","sso/verify2FA",
+            "customer/validate2FA","sso/checkAnswer","customer/checkAnswer",
+            "sso/validanswer","sso/answer","customer/answer",
+        ]
+        for c in cands:
+            full=f"{REST}/{c}"
+            try:
+                r3=s.post(full, json=payload, timeout=7)
+                txt=(r3.text or "")
+                is_html="<html" in txt.lower() or "status report" in txt.lower()
+                mark="✅" if (r3.status_code==200 and not is_html) else ("⚠️" if r3.status_code in (400,401,405) else "❌")
+                out.append(f"<p>{mark} {c} Status:{r3.status_code} Len:{len(txt)} HTML:{is_html} Body:{txt[:450].replace('<','&lt;')}</p>")
+                if r3.status_code==200 and not is_html:
+                    out.append(f"<h2 style='color:green'>FOUND! {full} Body: {txt[:800]}</h2>")
+                    # Adutha step - SessionID try - Adhayum inga ye panniduvom
+                    try:
+                        j3=r3.json()
+                        out.append(f"<p>2FA JSON Keys: {list(j3.keys()) if isinstance(j3,dict) else j3}</p>")
+                    except: pass
+            except Exception as e: out.append(f"<p>❌ {c} Err:{e}</p>")
+        # Step 3b - Same paths - FORM data-oda - Cookie vachu
+        out.append("<h3>Step3b - FORM + Cookie</h3>")
+        for c in ["sso/validAnswer","customer/validAnswer"]:
+            try:
+                r4=s.post(f"{REST}/{c}", data=payload, timeout=7)
+                out.append(f"<p>FORM {c} Status:{r4.status_code} Body:{r4.text[:400].replace('<','&lt;')}</p>")
+            except Exception as e: out.append(f"<p>FORM {c} Err:{e}</p>")
     except Exception as e: out.append(f"Err {e} {traceback.format_exc()[:2000]}")
     return "<br>".join(out)+"<br><a href='/'>Home</a>"
 if __name__=='__main__':
