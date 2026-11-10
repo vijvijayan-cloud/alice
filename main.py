@@ -11,7 +11,7 @@ STORE={"session":None}
 def home():
     auth_url=f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
     s=STORE.get("session")
-    return f"<h1>V58 - Pudhu API - open-api</h1><p>User:{USER_ID}</p><p>Session: {'YES' if s else 'ILLA'}</p><p><a href='{auth_url}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/test'><b>4. TEST - Holdings / Positions / Funds</b></a></p>"
+    return f"<h1>V59 - VIJAYAN.M - FINAL Dashboard</h1><p>User:{USER_ID}</p><p>Session: {'YES' if s else 'ILLA'}</p><p><a href='{auth_url}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD - Holdings + Funds</b></a></p>"
 @app.route('/manual')
 def manual():
     return """<h1>AuthCode</h1><form action='/exchange'><input name='authCode' placeholder='AuthCode' style='width:320px'><button>EXCHANGE</button></form><br><a href='/'>Home</a>"""
@@ -32,7 +32,7 @@ def exchange():
         sess=r.json().get("userSession")
         if sess:
             STORE["session"]=str(sess)
-            return "<h2 style='color:green'>SUCCESS! Session Saved!</h2><p><a href='/test'><b>CLICK - TEST</b></a></p>"
+            return "<h2 style='color:green'>SUCCESS! Session Saved!</h2><p><a href='/dashboard'><b>CLICK - DASHBOARD</b></a></p>"
         else: return f"<b>Session Illa - {r.text[:500]}</b><br><a href='/'>Home</a>"
     except Exception as e: return f"Err {e} <br><a href='/'>Home</a>"
 @app.route('/dashboard')
@@ -40,47 +40,53 @@ def dashboard():
     import requests
     sess=STORE.get("session")
     if not sess: return "<h1>Session Illa - Login pannunga!</h1><a href='/'>Home</a>"
-    h={"Authorization":f"Bearer {sess}","Content-Type":"application/json"}
-    BASE="https://ant.aliceblueonline.com/rest/AliceBlueAPIService"
-    try:
-        r=requests.get(f"{BASE}/api/customer/accountDetails", headers=h, params={"userId":USER_ID}, timeout=8)
-        j=r.json()
-        return f"<h1>Vanakkam {j.get('accountName')}</h1><p>Account: {j.get('accountId')} | Status: {j.get('accountStatus')} | Broker: {j.get('sBrokerName')}</p><p>Mobile: {j.get('cellAddr')} | Email: {j.get('emailAddr')}</p><p><a href='/test'>TEST - Holdings</a></p><br><a href='/'>Home</a>"
-    except Exception as e: return f"Err {e}"
-@app.route('/test')
-def test():
-    import requests
-    sess=STORE.get("session")
-    if not sess: return "<h1>Session Illa - Login pannunga!</h1><a href='/'>Home</a>"
     h={"Authorization":f"Bearer {sess}","Content-Type":"application/json","Accept":"application/json"}
     BASE="https://ant.aliceblueonline.com"
-    out=["<h1>V58 TEST - Pudhu open-api</h1>"]
-    # 10 mattum - Light!
-    cands=[
-        ("Holdings CNC","GET",f"{BASE}/open-api/od/v1/holdings/CNC",None),
-        ("Holdings MTF","GET",f"{BASE}/open-api/od/v1/holdings/MTF",None),
-        ("Positions","GET",f"{BASE}/open-api/od/v1/positions",None),
-        ("Funds","GET",f"{BASE}/open-api/od/v1/funds",None),
-        ("Limits","GET",f"{BASE}/open-api/od/v1/limits",None),
-        ("OrderBook","GET",f"{BASE}/open-api/od/v1/orders",None),
-        ("TradeBook","GET",f"{BASE}/open-api/od/v1/trades",None),
-        ("Profile","GET",f"{BASE}/open-api/od/v1/profile",None),
-        ("Holdings POST","POST",f"{BASE}/open-api/od/v1/holdings", {"userId":USER_ID}),
-        ("Positions POST","POST",f"{BASE}/open-api/od/v1/positions", {"userId":USER_ID}),
-    ]
-    for name, method, url, payload in cands:
+    def get(path):
         try:
-            if method=="GET":
-                r=requests.get(url, headers=h, params={"userId":USER_ID}, timeout=5)
-            else:
-                r=requests.post(url, headers=h, json=payload, timeout=5)
-            txt=(r.text or "")
-            is_json=txt.strip().startswith("{") or txt.strip().startswith("[")
-            ok=(r.status_code==200 and is_json)
-            out.append(f"<p>{'✅' if ok else '❌'} {name} Status:{r.status_code} JSON:{is_json} Body:{txt[:800].replace('<','&lt;')}</p>")
-            if ok: out.append(f"<h2 style='color:green'>FOUND! {name}</h2>")
-        except Exception as e:
-            out.append(f"<p>❌ {name} Err:{str(e)[:150]}</p>")
-    return "<br>".join(out)+"<br><a href='/'>Home</a> | <a href='/dashboard'>Dashboard</a>"
+            r=requests.get(f"{BASE}{path}", headers=h, params={"userId":USER_ID}, timeout=7)
+            return r.json() if r.text.strip().startswith("{") else {"raw":r.text[:300]}
+        except Exception as e: return {"error":str(e)}
+    prof=get("/open-api/od/v1/profile")
+    lim=get("/open-api/od/v1/limits")
+    hold_cnc=get("/open-api/od/v1/holdings/CNC")
+    hold_mtf=get("/open-api/od/v1/holdings/MTF")
+    pos=get("/open-api/od/v1/positions")
+    # Profile - result la irukkalam / direct la irukkalam
+    p=prof.get("result") if isinstance(prof.get("result"), dict) else prof
+    # Limits
+    l=lim.get("result") if isinstance(lim.get("result"), dict) else lim
+    out=[f"<h1>👋 Vanakkam {p.get('clientName') or p.get('accountName') or 'VIJAYAN.M'}</h1>"]
+    out.append(f"<p><b>Account:</b> {p.get('clientId') or p.get('accountId')} | <b>Status:</b> {p.get('accountStatus')} | <b>POA:</b> {p.get('isPoaProvided')} | <b>TOTP:</b> {p.get('isTotpEnabled')}</p>")
+    out.append(f"<p><b>Email:</b> {p.get('email')} | <b>Products:</b> {p.get('products')}</p>")
+    out.append("<hr><h2>💰 FUNDS - Limits</h2>")
+    if isinstance(l, dict) and l.get("tradingLimit"):
+        out.append(f"<h1 style='color:green'>Rs. {l.get('tradingLimit')}</h1>")
+        out.append(f"<p><b>Trading Limit:</b> {l.get('tradingLimit')} | <b>Opening Cash:</b> {l.get('openingCashLimit')}</p>")
+        out.append(f"<p><b>Utilized Margin:</b> {l.get('utilizedMargin')} | <b>Collateral:</b> {l.get('collateralMargin')} | <b>Credit For Sell:</b> {l.get('creditForSell')}</p>")
+        out.append(f"<p><b>Blocked For Payout:</b> {l.get('blockedForPayout')} | <b>AdHoc Margin:</b> {l.get('adHocMargin')}</p>")
+    else:
+        out.append(f"<p>Funds kidaikkala: {lim}</p>")
+    out.append("<hr><h2>📈 HOLDINGS - CNC</h2>")
+    hc=hold_cnc.get("result")
+    if isinstance(hc, list) and len(hc)>0:
+        for it in hc:
+            out.append(f"<p><b>{it.get('symbol') or it.get('tradingSymbol') or it}</b> - Qty: {it.get('quantity') or it.get('qty')} - Avg: {it.get('avgPrice')} - LTP: {it.get('ltp')} - P&L: {it.get('pnl')}</p>")
+    else:
+        out.append(f"<p>Holdings Illa - {hold_cnc.get('message') or hold_cnc}</p><p>Share vaangina thaan inga varum!</p>")
+    out.append("<hr><h2>📈 HOLDINGS - MTF</h2>")
+    hm=hold_mtf.get("result")
+    if isinstance(hm, list) and len(hm)>0:
+        for it in hm: out.append(f"<p>{it}</p>")
+    else:
+        out.append(f"<p>MTF Holdings Illa - {hold_mtf.get('message') or hold_mtf}</p>")
+    out.append("<hr><h2>📊 POSITIONS</h2>")
+    pp=pos.get("result")
+    if isinstance(pp, list) and len(pp)>0:
+        for it in pp: out.append(f"<p>{it}</p>")
+    else:
+        out.append(f"<p>Positions Illa - {pos.get('message') or pos}</p><p>Trade pannina thaan inga varum!</p>")
+    out.append("<hr><p><a href='/dashboard'>🔄 REFRESH</a> | <a href='/'>Home</a></p>")
+    return "<br>".join(out)
 if __name__=='__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
