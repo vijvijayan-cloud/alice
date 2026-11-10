@@ -1,4 +1,4 @@
-import os, hashlib, json, threading, time, math, csv, io
+import os, hashlib, json, threading, time, math, csv, io, re
 from flask import Flask, request, redirect
 from datetime import datetime, timedelta, timezone
 try:
@@ -17,7 +17,7 @@ def clean(n):
 USER_ID = clean("ALICE_USER_ID")
 APP_ID = clean("ALICE_APP_ID")
 APP_SECRET = clean("ALICE_APP_SECRET")
-STORE = {"session": None, "symbol_cache": {}}
+STORE = {"session": None, "symbol_cache": {}, "spaced_cache": {}}
 
 BOT = {
     "status": "STOPPED",
@@ -54,65 +54,76 @@ def get_expiry():
 
 def build_symbol(strike, opt_type):
     exp = get_expiry()
-    sym = f"NIFTY{exp}{strike}{opt_type}"
-    log(f"Symbol Build: {sym} | Expiry: {exp}")
-    return sym
+    # ✅ SPACE-oda Symbol - Idhu thaan Correct!
+    spaced = f"NIFTY {exp} {strike} {opt_type}"
+    compact = f"NIFTY{exp}{strike}{opt_type}"
+    log(f"Symbol Build: Spaced=[{spaced}] Compact=[{compact}] Expiry:{exp}")
+    return spaced, compact
 
-# ---------- symbolId FIX ✅ - Contract Master la irundhu Token Edukkuradhu ----------
-def get_symbol_id(sym):
+# ---------- symbolId + Spaced Symbol FIX ✅ - Space-a Remove Panni Compare Pannu! ----------
+def get_symbol_info(strike, opt_type):
     import requests
-    if sym in STORE["symbol_cache"]:
-        return STORE["symbol_cache"][sym]
+    spaced, compact = build_symbol(strike, opt_type)
+    # Cache la Irundha - Adha Return pannu
+    if compact in STORE["symbol_cache"]:
+        return STORE["symbol_cache"][compact], STORE["spaced_cache"].get(compact, spaced)
+    # Normalise - Space / - / _ Ellam Remove Panni Compare Pannanum!
+    target = re.sub(r'[^A-Z0-9]', '', spaced.upper())
+    log(f"Looking for Normalised: {target}")
     try:
-        # AliceBlue Contract Master - NFO
         urls = [
             "https://v2api.aliceblueonline.com/restpy/contract_master?exch=NFO",
             "https://ant.aliceblueonline.com/restpy/contract_master?exch=NFO",
         ]
         for url in urls:
             try:
-                r = requests.get(url, timeout=15)
+                r = requests.get(url, timeout=20)
                 txt = r.text
                 log(f"Contract Master {url} Status:{r.status_code} Len:{len(txt)}")
-                # CSV format-a irundha - Search pannu
-                if sym in txt:
-                    for line in txt.splitlines():
-                        if sym in line:
-                            parts = line.split(",")
-                            log(f"Found Line: {line[:200]}")
-                            # Token - Usually 2nd / 3rd column
-                            for p in parts:
-                                p = p.strip()
-                                if p.isdigit() and len(p) >= 4:
-                                    STORE["symbol_cache"][sym] = p
-                                    log(f"✅ symbolId Found: {p} for {sym}")
-                                    return p
-                # JSON format-a irundha
-                try:
-                    j = r.json()
-                    if isinstance(j, list):
-                        for it in j:
-                            if str(it).find(sym) >= 0:
-                                log(f"Found JSON: {str(it)[:300]}")
-                                for k in ["token", "symbolId", "Token", "instrument_token"]:
-                                    if k in it:
-                                        STORE["symbol_cache"][sym] = str(it[k])
-                                        return str(it[k])
-                except:
-                    pass
+                if r.status_code != 200 or len(txt) < 1000:
+                    continue
+                # Line by Line - Normalise Panni Compare!
+                for line in txt.splitlines():
+                    if "NIFTY" not in line:
+                        continue
+                    norm_line = re.sub(r'[^A-Z0-9]', '', line.upper())
+                    if target in norm_line:
+                        log(f"✅ MATCH Line: {line[:250]}")
+                        # CSV Split - Token - Usually First Column
+                        parts = [p.strip() for p in line.split(",")]
+                        log(f"Parts: {parts[:8]}")
+                        # First numeric token - Adhu thaan symbolId
+                        token = None
+                        for p in parts:
+                            if p.isdigit() and len(p) >= 4:
+                                token = p
+                                break
+                        # TradingSymbol - NIFTY nu Start Aagura Column - Adhu thaan Spaced Symbol!
+                        real_sym = spaced
+                        for p in parts:
+                            if p.upper().startswith("NIFTY"):
+                                real_sym = p.strip()
+                                break
+                        if token:
+                            STORE["symbol_cache"][compact] = token
+                            STORE["spaced_cache"][compact] = real_sym
+                            log(f"✅ symbolId Found: {token} | Real Symbol: [{real_sym}]")
+                            return token, real_sym
+                        break
+                log(f"❌ No Match in {url} for {target}")
             except Exception as e:
                 log(f"Contract Master Err {url} {e}")
     except Exception as e:
-        log(f"get_symbol_id Err {e}")
-    log(f"⚠️ symbolId Kedaikkala {sym} - TradingSymbol mattum Use Pannuren!")
-    return None
+        log(f"get_symbol_info Err {e}")
+    log(f"⚠️ symbolId Kedaikkala - Spaced Symbol mattum Use Pannuren!")
+    return None, spaced
 
 @app.route('/')
 def home():
     auth = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
     s = STORE.get("session")
     now = ist_now().strftime("%H:%M:%S IST - %d %b %Y")
-    return f"<h1>V71 - FULLY AUTO - ITM 1 - symbolId FIX</h1><p>Server Time (IST): {now}</p><p>Session: {'YES' if s else 'ILLA'} | Expiry: {get_expiry()}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
+    return f"<h1>V72 - FULLY AUTO - ITM 1 - SPACE SYMBOL FIX</h1><p>Server Time (IST): {now}</p><p>Session: {'YES' if s else 'ILLA'} | Expiry: {get_expiry()}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
 
 @app.route('/manual')
 def manual():
@@ -175,51 +186,63 @@ def get_ltp():
     except:
         return None
 
-# ---------- ORDER - V71 FIX ✅ - ONLY Correct ANT URL + symbolId + Full Headers ----------
+# ---------- ORDER - V72 FIX ✅ - Spaced Symbol + symbolId - Rendu Try! ----------
 def place_order_api(strike, opt_type, trans):
     import requests
     sess = STORE.get("session")
     if not sess:
         return {"error": "No Session"}
-    sym = build_symbol(strike, opt_type)
-    sid = get_symbol_id(sym)
-    payload = {
-        "userId": USER_ID,
-        "exch": "NFO",
-        "pCode": "MIS",
-        "price": 0,
-        "priceType": "MARKET",
-        "qty": 65,
-        "ret": "DAY",
-        "tradingSymbol": sym,
-        "transType": trans,
-        "trigPrice": 0,
-        "orderTag": "VIJAYAN_ITM1",
-        "complexity": "REGULAR",
-        "discQty": 0,
-    }
+    sid, real_sym = get_symbol_info(strike, opt_type)
+    spaced, compact = build_symbol(strike, opt_type)
+    # TRY 1 - Real Symbol (Contract Master la Irukkura Symbol) + Token
+    # TRY 2 - Spaced Symbol mattum
+    tries = []
     if sid:
-        payload["symbolId"] = sid
-        payload["token"] = sid
-    log(f"{trans} Payload: {payload}")
-    h = {
-        "Authorization": f"Bearer {sess}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "userId": USER_ID,
-    }
-    try:
-        r = requests.post("https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/placeOrder/executePlaceOrder", headers=h, json=payload, timeout=12)
-        log(f"{trans} ORDER {sym} Status:{r.status_code} Resp:{r.text[:1000]}")
-        # Response Headers la - Allow / Error paaru
-        log(f"Resp Headers: {dict(r.headers)}")
+        tries.append((real_sym, sid))
+    tries.append((real_sym, None))
+    if compact != real_sym:
+        tries.append((compact, sid))
+    h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json", "Accept": "application/json", "userId": USER_ID}
+    last = {"error": "No Try"}
+    for idx, (sym_try, sid_try) in enumerate(tries):
+        payload = {
+            "userId": USER_ID,
+            "exch": "NFO",
+            "pCode": "MIS",
+            "price": 0,
+            "priceType": "MARKET",
+            "qty": 65,
+            "ret": "DAY",
+            "tradingSymbol": sym_try,
+            "transType": trans,
+            "trigPrice": 0,
+            "orderTag": "VIJAYAN_ITM1",
+            "complexity": "REGULAR",
+            "discQty": 0,
+        }
+        if sid_try:
+            payload["symbolId"] = sid_try
+            payload["token"] = sid_try
+        log(f"TRY {idx+1} {trans} Payload: {payload}")
         try:
-            return r.json()
-        except:
-            return {"raw": r.text[:1000], "status": r.status_code}
-    except Exception as e:
-        log(f"Order Err {e}")
-        return {"error": str(e)}
+            r = requests.post("https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/placeOrder/executePlaceOrder", headers=h, json=payload, timeout=12)
+            log(f"TRY {idx+1} {trans} ORDER [{sym_try}] Status:{r.status_code} Resp:{r.text[:1000]}")
+            try:
+                j = r.json()
+            except:
+                j = {"raw": r.text[:1000], "status": r.status_code}
+            last = j
+            # Success-a irundha - Stop!
+            if r.status_code == 200 and ("Success" in str(j) or "orderId" in str(j).lower() or "Order" in str(j)):
+                log(f"✅ TRY {idx+1} SUCCESS!")
+                return j
+            # 400 Empty Illa - Vera Error Vandha - Adha Return pannu - Try Vendaam!
+            if r.status_code != 400 or len(r.text.strip()) > 5:
+                return j
+        except Exception as e:
+            log(f"TRY {idx+1} Err {e}")
+            last = {"error": str(e)}
+    return last
 
 def place_buy(strike, opt_type):
     return place_order_api(strike, opt_type, "BUY")
@@ -373,7 +396,7 @@ def testorder():
 def debug():
     import requests
     sess = STORE.get("session")
-    out = [f"<h1>DEBUG</h1><p>IST Now: {ist_now().strftime('%H:%M:%S IST - %d %b %Y')}</p><p>Session: {'YES - ' + sess[:20] + '...' if sess else 'ILLA - LOGIN pannunga!'}</p><p>Expiry: {get_expiry()} | Test Symbol: {build_symbol(24450, 'CE')}</p>"]
+    out = [f"<h1>DEBUG</h1><p>IST Now: {ist_now().strftime('%H:%M:%S IST - %d %b %Y')}</p><p>Session: {'YES - ' + sess[:20] + '...' if sess else 'ILLA - LOGIN pannunga!'}</p><p>Expiry: {get_expiry()} | Test Symbol Spaced: {build_symbol(24450, 'CE')[0]}</p>"]
     if sess:
         h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
         try:
