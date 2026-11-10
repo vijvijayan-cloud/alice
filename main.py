@@ -12,7 +12,7 @@ STORE = {"session": None}
 
 BOT = {
     "status": "STOPPED",
-    "mode": "LIVE - FULLY AUTO",
+    "mode": "LIVE - FULLY AUTO - ITM 1",
     "symbol": "NIFTY",
     "qty": 65,
     "high": None,
@@ -42,7 +42,7 @@ def log(m):
 def home():
     auth = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
     s = STORE.get("session")
-    return f"<h1>V63 - FULLY AUTO BOT - FUNDS FIXED</h1><p>Session: {'YES' if s else 'ILLA'}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Morning LOGIN pannitu - START BOT pannunga - Appuram Bot thana paathukkum!</b></p>"
+    return f"<h1>V64 - FULLY AUTO - ITM 1 BOT</h1><p>Session: {'YES' if s else 'ILLA'}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
 
 @app.route('/manual')
 def manual():
@@ -84,7 +84,7 @@ def get_funds():
         j = r.json()
         log(f"Funds Raw: {str(j)[:200]}")
         res = j.get("result", {})
-        # FIX: result List-a Vandha - First Item-a Edu! - AliceBlue List Anuppudhu!
+        # FIX: result List-a Vandha - First Item-a Edu!
         if isinstance(res, list):
             if len(res) > 0:
                 res = res[0]
@@ -137,7 +137,7 @@ def place_sell(strike, opt_type):
         log(f"Sell Err {e}")
         return {"error": str(e)}
 
-# ---------- BOT LOOP - FULLY AUTO ----------
+# ---------- BOT LOOP - FULLY AUTO - ITM 1 ----------
 def bot_loop():
     while True:
         try:
@@ -169,19 +169,21 @@ def bot_loop():
                 if now.hour == 9 and now.minute >= 20 and not BOT["candle_locked"] and BOT["high"]:
                     BOT["candle_locked"] = True
                     log(f"CANDLE LOCKED ✅ High:{BOT['high']} Low:{BOT['low']} - Waiting for Breakout...")
-                # 4. BREAKOUT CHECK - 9:20 to 3:15
+                # 4. BREAKOUT CHECK - ITM 1 - 9:20 to 3:15
                 if BOT["candle_locked"] and not BOT["trade_done"]:
                     ltp = get_ltp()
                     if ltp:
                         BOT["ltp"] = ltp
                         if ltp > BOT["high"]:
-                            strike = int(round(ltp / 50) * 50)
-                            log(f"🚀 BREAKOUT! LTP {ltp} > High {BOT['high']} - CE BUY {strike}CE")
+                            atm = int(round(ltp / 50) * 50)
+                            strike = atm - 50  # CE ku ITM 1 - 1 Strike Keela
+                            log(f"🚀 BREAKOUT! LTP {ltp} > High {BOT['high']} - ITM 1 CE BUY {strike}CE (ATM {atm} - 50)")
                             res = place_buy(strike, "CE")
                             BOT["entry"] = ltp; BOT["type"] = "CE"; BOT["strike"] = strike; BOT["sl"] = ltp - 30; BOT["trade_done"] = True
                         elif ltp < BOT["low"]:
-                            strike = int(round(ltp / 50) * 50)
-                            log(f"🔻 BREAKDOWN! LTP {ltp} < Low {BOT['low']} - PE BUY {strike}PE")
+                            atm = int(round(ltp / 50) * 50)
+                            strike = atm + 50  # PE ku ITM 1 - 1 Strike Mela
+                            log(f"🔻 BREAKDOWN! LTP {ltp} < Low {BOT['low']} - ITM 1 PE BUY {strike}PE (ATM {atm} + 50)")
                             res = place_buy(strike, "PE")
                             BOT["entry"] = ltp; BOT["type"] = "PE"; BOT["strike"] = strike; BOT["sl"] = ltp - 30; BOT["trade_done"] = True
                 # 5. TRAILING SL - 1 Point ku 1 Point
@@ -214,18 +216,18 @@ def dashboard():
     b = BOT
     logs = "<br>".join(b["logs"][:25])
     return f"""
-    <h1>VIJAYAN ALGO - FULLY AUTO - NIFTY MOMENTUM</h1>
+    <h1>VIJAYAN ALGO - FULLY AUTO - ITM 1 - NIFTY MOMENTUM</h1>
     <p><b>Funds:</b> Rs.{b['funds']} | <b>Mode:</b> {b['mode']} | <b>Status:</b> {b['status']}</p>
     <table border=1 cellpadding=8><tr><th>Strategy</th><th>Status</th><th>PNL</th><th>Broker</th></tr>
-    <tr><td>VIJAYAN NIFTY MOMENTUM - 1 LOT - 5MIN BREAKOUT - AUTO</td><td>{b['status']}</td><td>Rs.{b['pnl']}</td><td>ALICEBLUE</td></tr></table>
+    <tr><td>VIJAYAN NIFTY MOMENTUM - 1 LOT - ITM 1 - 5MIN BREAKOUT - AUTO</td><td>{b['status']}</td><td>Rs.{b['pnl']}</td><td>ALICEBLUE</td></tr></table>
     <h2>Live Status</h2>
     <p><b>First Candle High:</b> {b['high']} {'✅ LOCKED' if b['candle_locked'] else '🔴 MARKING...'} | <b>Low:</b> {b['low']} {'✅ LOCKED' if b['candle_locked'] else '🔴 MARKING...'}</p>
     <p><b>Entry:</b> {b['entry']} | <b>Type:</b> {b['strike']} {b['type']} | <b>LTP:</b> {b['ltp']} | <b>SL:</b> {b['sl']} (30 Points + Trailing 1)</p>
-    <p><b>Trade Done:</b> {b['trade_done']} | <b>Order ID:</b> {b['order_id']}</p>
-    <hr><p><a href='/bot/start'><button style='background:green;color:white;padding:12px'>▶️ START BOT - FULLY AUTO</button></a>
+    <p><b>Trade Done:</b> {b['trade_done']} | <b>Strike Logic:</b> CE = ATM - 50 | PE = ATM + 50</p>
+    <hr><p><a href='/bot/start'><button style='background:green;color:white;padding:12px'>▶️ START BOT - FULLY AUTO - ITM 1</button></a>
     <a href='/bot/stop'><button style='background:red;color:white;padding:12px'>⏹️ STOP BOT</button></a>
     <a href='/bot/exit'><button style='background:orange;padding:12px'>🚪 EXIT ALL</button></a></p>
-    <p><a href='/bot/testcandle'><button style='background:blue;color:white;padding:12px'>🧪 TEST MODE - Fake Candle Test - Evening la Test Pannalam!</button></a>
+    <p><a href='/bot/testcandle'><button style='background:blue;color:white;padding:12px'>🧪 TEST MODE - ITM 1 Test - Evening la Test Pannalam!</button></a>
     <a href='/debug'><button style='padding:12px'>🔍 DEBUG - Session / Funds Check</button></a></p>
     <hr><h2>Logs - Bot Enna Pannudhu?</h2><p>{logs}</p>
     <p><a href='/dashboard'>🔄 Refresh</a> | <a href='/'>Home</a></p>
@@ -238,7 +240,7 @@ def start():
     BOT["trade_done"] = False; BOT["entry"] = None; BOT["pnl"] = 0
     BOT["funds"] = 0; BOT["funds_checked"] = False
     BOT["sl"] = None; BOT["ltp"] = None; BOT["strike"] = None; BOT["type"] = None
-    log("BOT STARTED - FULLY AUTO - Morning 9:15 la Mark pannum!")
+    log("BOT STARTED - FULLY AUTO - ITM 1 - Morning 9:15 la Mark pannum!")
     return redirect("/dashboard")
 
 @app.route('/bot/stop')
@@ -264,10 +266,10 @@ def exitall():
 @app.route('/bot/testcandle')
 def testcandle():
     BOT["high"] = 24510; BOT["low"] = 24460; BOT["candle_locked"] = True; BOT["ltp"] = 24520
-    log("🧪 TEST MODE - Fake Candle Set High:24510 Low:24460 LTP:24520 - Breakout Test!")
-    log("🧪 TEST: LTP 24520 > High 24510 - CE BUY Trigger aaganum - Test mattum - Real Order Pogadhu!")
-    BOT["entry"] = 24520; BOT["type"] = "CE"; BOT["strike"] = 24500; BOT["sl"] = 24520 - 30; BOT["trade_done"] = True
-    log(f"🧪 TEST ENTRY CE 24500 @ 24520 SL:{BOT['sl']} - Trailing Test Ready!")
+    log("🧪 TEST MODE - ITM 1 Test!")
+    log("🧪 LTP 24520 - ATM 24500 - ITM 1 CE = 24450 CE")
+    BOT["entry"] = 24520; BOT["type"] = "CE"; BOT["strike"] = 24450; BOT["sl"] = 24520 - 30; BOT["trade_done"] = True
+    log(f"🧪 TEST ENTRY ITM 1 CE 24450 @ 24520 SL:{BOT['sl']} - Trailing Test Ready!")
     return redirect("/dashboard")
 
 @app.route('/debug')
