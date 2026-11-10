@@ -1,4 +1,4 @@
-import os, time, traceback, hashlib, json, base64, glob, inspect
+import os, time, traceback, hashlib, json, base64, inspect
 from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, request, redirect
 import threading
@@ -17,7 +17,6 @@ try:
     HAS_CRYPTO=True
 except:
     HAS_CRYPTO=False
-
 app = Flask(__name__)
 def clean_env(name):
     v=os.getenv(name,"")
@@ -33,14 +32,8 @@ try: LOTS=int(os.getenv("LOTS","1"))
 except: LOTS=1
 LOT_SIZE=65
 HOST="https://ant.aliceblueonline.com/rest/AliceBlueAPIService"
-URLS={
-  "getEncpkey": f"{HOST}/sso/getEncryptionKey",
-  "webLogin": f"{HOST}/sso/webLogin",
-  "apiGetEncpkey": f"{HOST}/sso/getEncpkey",
-  "sessionID": f"{HOST}/sso/authorize/getSession",
-  "placeOrder": f"{HOST}/api/placeOrder/executePlaceOrder",
-}
-state={"strategy":"NIFTY_2ND_CANDLE_FLIP","mode":MODE,"login":"STARTING...","nifty_price":0,"signal":"WAITING FOR 9:20","in_trade":False,"side":"","entry":0,"pnl":0,"reason":"","last_update":"","candle1":"","candle2":"","live_order":"","debug":"Waiting...","session_id":"","real_session":"","api_version":"V26_INSPECT_SDK","test_order_result":"","lot_size":LOT_SIZE,"raw_login":""}
+URLS={"getEncpkey": f"{HOST}/sso/getEncryptionKey","webLogin": f"{HOST}/sso/webLogin","apiGetEncpkey": f"{HOST}/sso/getEncpkey","sessionID": f"{HOST}/sso/authorize/getSession","placeOrder": f"{HOST}/api/placeOrder/executePlaceOrder"}
+state={"strategy":"NIFTY_2ND_CANDLE_FLIP","mode":MODE,"login":"STARTING...","nifty_price":0,"signal":"WAITING FOR 9:20","in_trade":False,"side":"","entry":0,"pnl":0,"reason":"","last_update":"","candle1":"","candle2":"","live_order":"","debug":"Waiting...","session_id":"","real_session":"","api_version":"V26FIX_INSPECT_SDK","test_order_result":"","lot_size":LOT_SIZE,"raw_login":""}
 def get_ist(): return datetime.now(timezone.utc)+timedelta(hours=5,minutes=30)
 session_id_global=""; real_session_global=""; last_login_try=0
 def is_valid_key(k):
@@ -94,35 +87,30 @@ def safe_post(url, payload):
     except Exception as e:
         return 0, f"REQUEST ERR: {e}", ""
 def inspect_sdk():
-    # SDK file-a thiranthu unmaiyaana URL-a edukkrom - Guess illa!
     out=[]
     try:
         import alice_blue as mod
         out.append(f"SDK File: {getattr(mod,'__file__','?')}")
-        out.append(f"SDK Dir: {dir(mod)[:50]}")
-        # login function-a paaru
-        for fname in ["login_and_get_sessionID","login","get_session_id","getSessionId","login_and_get_session_id"]:
+        for fname in ["login_and_get_sessionID","login","get_session_id","getSessionId"]:
             fn=getattr(mod, fname, None)
             if fn:
                 try:
                     src=inspect.getsource(fn)
-                    out.append(f"<b>=== SDK Function {fname} ===</b><pre>{src[:5000]}</pre>")
+                    out.append(f"--- SDK Function {fname} ---")
+                    out.append(src[:6000].replace("<","&lt;").replace(">","&gt;"))
                 except Exception as e: out.append(f"{fname} source fail {e}")
-        # File full-a thedu - ella .py file-layum URL thedu
-        base=os.path.dirname(getattr(mod,'__file__',''))
-        out.append(f"SDK Base: {base}")
-        for root, dirs, files in os.walk(base):
-            for f in files:
-                if f.endswith(".py"):
-                    fp=os.path.join(root,f)
+        # AliceBlue class-a paaru
+        AB=getattr(mod,"AliceBlue",None)
+        if AB:
+            out.append(f"AliceBlue class found: {AB}")
+            for mname in dir(AB):
+                if "login" in mname.lower() or "session" in mname.lower() or "encrypt" in mname.lower() or "two" in mname.lower() or "valid" in mname.lower():
+                    out.append(f"Method: {mname}")
                     try:
-                        txt=open(fp, errors="ignore").read()
-                        # URL / endpoint irukka line-a mattum edhu
-                        for i, line in enumerate(txt.splitlines()):
-                            low=line.lower()
-                            if any(k in low for k in ["getencryptionkey","weblogin","validuser","twofa","two_fa","getsession","authorize","sessionid","ant.alice","v2api","aliceblueonline"]):
-                                out.append(f"{f}:{i+1}: {line.strip()[:300]}")
-                    except Exception as e: out.append(f"Read {f} fail {e}")
+                        fn=getattr(AB, mname)
+                        src=inspect.getsource(fn)
+                        out.append(src[:4000].replace("<","&lt;").replace(">","&gt;"))
+                    except Exception as e: out.append(f"Method {mname} fail {e}")
     except Exception as e:
         out.append(f"Inspect Fail: {e} {traceback.format_exc()[:1000]}")
     return "<br>".join(out)
@@ -130,8 +118,7 @@ def sdk_flow_login():
     out=[]
     totp_now=get_totp()
     out.append(f"USER:{USER_ID} APP:{APP_ID} DOB:{DOB_YEAR} TOTP:{totp_now} MODE:{MODE}")
-    # MUDHALIL SDK FILE-A PAARU - Adhu thaan unmai
-    out.append("<b>=== SDK INSPECT - Unmaiyaana URL ===</b>")
+    out.append("<b>=== SDK INSPECT ===</b>")
     out.append(inspect_sdk())
     for tfa_label, tfa_val in [("DOB",DOB_YEAR),("TOTP",totp_now)]:
         if not tfa_val: continue
@@ -150,14 +137,8 @@ def sdk_flow_login():
             for i,a in enumerate(aes_list): out.append(f"AES[{i}] Len:{len(str(a))} Start:{str(a)[:30]}")
             if not aes_list: continue
             checksum=aes_list[0]
-            # STEP2 V0 mattum - Idhu thaan correct
             code, txt, _ = safe_post(URLS["webLogin"], {"userId":USER_ID,"userData":checksum})
             out.append(f"STEP2 webLogin V0 Status:{code} Body:{txt[:1000]}")
-            # STEP2 la irundhu enna kedaikudhu? - redirectUrl / authCode irukka paaru
-            # Sila samayam webLogin-e 2FA va kekkum - adhula DOB/TOTP-a serthu anuppa vendiyadha irukkum
-            # Adhanala webLogin-a 2FA-oda serthu try pannu - aana field name vera irukkanum
-            # EncDataDTO allowed: encKey, apiKey, userId, imei, fcmtoken, loginId, stat, userData, emsg, emsg1, version
-            # So twoFA-a userData-la serthu anuppanum? Password+DOB-a serthu encrypt pannu?
             for combo_label, plain in [(f"PASS+DOB", f"{PASSWORD}{tfa_val}"),(f"DOB+PASS", f"{tfa_val}{PASSWORD}"),(f"PASS", PASSWORD)]:
                 c_list=sdk_aes(plain, str(encKey))
                 if not c_list: continue
@@ -168,16 +149,14 @@ def sdk_flow_login():
                     try:
                         j2=json.loads(txt2)
                         if j2.get("stat") in ["Ok","OK","ok","Success"]:
-                            out.append(f"STEP2 COMBO {combo_label} SUCCESS stat Ok! Full:{j2}")
-                            # redirectUrl irundha authCode edhu
+                            out.append(f"STEP2 COMBO {combo_label} SUCCESS Full:{j2}")
                             ru=j2.get("redirectUrl") or j2.get("redirectURL") or ""
                             if ru:
                                 try:
                                     q=parse_qs(urlparse(ru).query)
                                     if "authCode" in q:
                                         auth_code=q["authCode"][0]
-                                        out.append(f"STEP2 COMBO authCode from redirect:{auth_code[:12]}***")
-                                        # STEP5 ku po
+                                        out.append(f"authCode:{auth_code[:12]}***")
                                         checksum2=hashlib.sha256(f"{USER_ID}{auth_code}{APP_SECRET}".encode()).hexdigest()
                                         code5, txt5, _ = safe_post(URLS["sessionID"], {"checksum":checksum2})
                                         out.append(f"STEP5 sessionID Status:{code5} Body:{txt5[:800]}")
@@ -186,7 +165,7 @@ def sdk_flow_login():
                                                 j5=json.loads(txt5)
                                                 sess=j5.get("session_id") or j5.get("sessionId") or j5.get("sessionID")
                                                 if sess and len(str(sess))>10:
-                                                    out.append(f"<b style='color:green'>SUCCESS! Session:{str(sess)[:12]}*** via COMBO {combo_label}</b>")
+                                                    out.append(f"<b>SUCCESS! Session:{str(sess)[:12]}*** via COMBO {combo_label}</b>")
                                                     return "<br>".join(out), str(sess)
                                             except: pass
                     except: pass
@@ -203,11 +182,11 @@ def alice_login_v2():
             return True
         raw, token = sdk_flow_login()
         state["raw_login"]=raw
-        state["debug"]=f"V26 INSPECT USER:{USER_ID} DOB:{DOB_YEAR} TOTP:{get_totp()}"
+        state["debug"]=f"V26FIX USER:{USER_ID} DOB:{DOB_YEAR} TOTP:{get_totp()}"
         if token and is_valid_key(token):
             session_id_global=token; real_session_global=token
             state["session_id"]=token[:12]+"***"; state["real_session"]=token[:12]+"***"
-            state["login"]=f"LIVE READY V26 - User {USER_ID[:3]}*** - LOT 65"
+            state["login"]=f"LIVE READY V26FIX - User {USER_ID[:3]}*** - LOT 65"
             return True
         state["login"]=f"LOGIN FAIL - /inspect-sdk la SDK URL Paaru"
         return False
@@ -257,7 +236,7 @@ def place_trade(side, price, nifty_price):
                 if not real_session_global and not session_id_global: state["reason"]="LIVE FAILED - No Session"; state["live_order"]="FAILED - No Session"; state["in_trade"]=False; return
             strike=round(float(nifty_price)/50)*50; qty=LOT_SIZE*LOTS
             code,body,url=place_order_direct_v2(strike,side,qty)
-            state["reason"]=f"LIVE ORDER V26 - NIFTY {strike} {side} x {LOTS} Lot (Qty {qty}) - Status:{code}"; state["live_order"]=f"V26 - URL:{url} Status:{code} Body:{body}"
+            state["reason"]=f"LIVE ORDER V26FIX - NIFTY {strike} {side} x {LOTS} Lot (Qty {qty}) - Status:{code}"; state["live_order"]=f"V26FIX - URL:{url} Status:{code} Body:{body}"
         except Exception as e: state["reason"]=f"LIVE ORDER FAILED:{e}"; state["live_order"]=f"FAILED:{e}"
 trade_done_today=""
 def bot_loop():
@@ -292,14 +271,14 @@ try: threading.Thread(target=bot_loop, daemon=True).start()
 except Exception as e: print(f"Thread Error:{e}",flush=True)
 @app.route('/')
 def home():
-    return f"""<h1>ALICE BOT - {state['mode']} - V26 INSPECT SDK</h1><p>Time: {state['last_update']}</p><p>Login: {state['login']} | Mode: <b>{state['mode']}</b> | Lot: <b>{LOT_SIZE}</b></p><p>Signal: {state['signal']}</p><p>Candle1: {state['candle1']}</p><p>Candle2: {state['candle2']}</p><p>In Trade: {state['in_trade']} Side: {state['side']} Entry: {state['entry']}</p><p>Reason: {state['reason']}</p><p>Live Order: {state['live_order']}</p><p>Test: {state['test_order_result']}</p><p>Session: {state['session_id']}</p><hr><h3 style='color:red'>REAL TEST ORDER - 65 QTY</h3><p><a href='/test-order-confirm' style='background:orange; padding:10px; color:black;'><b>TEST ORDER - NIFTY ATM CE - 65 QTY</b></a></p><hr><p><a href='/force-login'><b>/force-login</b></a> | <a href='/test'>/test</a> | <a href='/inspect-sdk'>INSPECT SDK - Unmai URL</a> | <a href='/status'>STATUS</a></p><hr><h3>DEBUG:</h3><p>{state['debug']}</p><h3>RAW:</h3><p>{state['raw_login']}</p><script>setTimeout(()=>location.reload(),10000)</script>"""
+    return f"""<h1>ALICE BOT - {state['mode']} - V26FIX INSPECT SDK</h1><p>Time: {state['last_update']}</p><p>Login: {state['login']} | Mode: <b>{state['mode']}</b> | Lot: <b>{LOT_SIZE}</b></p><p>Signal: {state['signal']}</p><p>Candle1: {state['candle1']}</p><p>Candle2: {state['candle2']}</p><p>In Trade: {state['in_trade']} Side: {state['side']} Entry: {state['entry']}</p><p>Reason: {state['reason']}</p><p>Live Order: {state['live_order']}</p><p>Test: {state['test_order_result']}</p><p>Session: {state['session_id']}</p><hr><h3 style='color:red'>REAL TEST ORDER - 65 QTY</h3><p><a href='/test-order-confirm' style='background:orange; padding:10px; color:black;'><b>TEST ORDER - NIFTY ATM CE - 65 QTY</b></a></p><hr><p><a href='/force-login'><b>/force-login</b></a> | <a href='/test'>/test</a> | <a href='/inspect-sdk'>INSPECT SDK</a> | <a href='/status'>STATUS</a></p><hr><h3>DEBUG:</h3><p>{state['debug']}</p><h3>RAW:</h3><p>{state['raw_login']}</p><script>setTimeout(()=>location.reload(),10000)</script>"""
 @app.route('/inspect-sdk')
 def inspect_sdk_route():
     return f"<h2>SDK Inspect - Unmaiyaana URL</h2><p>{inspect_sdk()}</p><br><a href='/'>Home</a> | <a href='/test'>Test</a>"
 @app.route('/force-login')
 def force_login():
     ok=alice_login_v2()
-    return f"<h2>Force Login V26</h2><p>Result: {state['login']}</p><p>Debug: {state['debug']}</p><hr><h3>RAW:</h3><p>{state['raw_login']}</p><p><a href='/'>Home</a> | <a href='/test-order-confirm'>Test Order</a></p>"
+    return f"<h2>Force Login V26FIX</h2><p>Result: {state['login']}</p><p>Debug: {state['debug']}</p><hr><h3>RAW:</h3><p>{state['raw_login']}</p><p><a href='/'>Home</a> | <a href='/test-order-confirm'>Test Order</a></p>"
 @app.route('/set-session')
 def set_session_page():
     sess=request.args.get("s","").strip()
@@ -328,18 +307,18 @@ def test_order_do():
     elif "401" in str(code) or "invalid" in bl: interp="<h3 style='color:red'>❌ FAIL - Session Problem</h3>"
     elif code==200: interp="<h3 style='color:green'>✅ ORDER PLACED!</h3>"
     else: interp=f"<h3>Status {code} - Screenshot Anuppunga</h3>"
-    return f"""<h2>REAL TEST ORDER RESULT - V26 - LOT 65</h2><p>Nifty:{nifty} Strike:{strike} CE Qty:{qty}</p><p>URL:{url}</p><p>Status:{code}</p><p>Body:{body}</p><hr>{interp}<hr><p><a href='/'>Home</a></p>"""
+    return f"""<h2>REAL TEST ORDER RESULT - V26FIX - LOT 65</h2><p>Nifty:{nifty} Strike:{strike} CE Qty:{qty}</p><p>URL:{url}</p><p>Status:{code}</p><p>Body:{body}</p><hr>{interp}<hr><p><a href='/'>Home</a></p>"""
 @app.route('/test')
 def test_encpkey():
     raw, token = sdk_flow_login()
-    return f"<h2>Test V26 - Inspect SDK</h2><p>{raw}</p><p>Token: {str(token)[:12] if token else 'NONE'}</p><br><a href='/'>Home</a> | <a href='/inspect-sdk'>Inspect SDK</a>"
+    return f"<h2>Test V26FIX - Inspect SDK</h2><p>{raw}</p><p>Token: {str(token)[:12] if token else 'NONE'}</p><br><a href='/'>Home</a> | <a href='/inspect-sdk'>Inspect SDK</a>"
 @app.route('/status')
 def status(): return jsonify(state)
 @app.route('/login')
 def login_redirect(): return redirect(f"https://ant.aliceblueonline.com/?appcode={APP_ID}")
 @app.route('/callback')
-def callback(): return f"<h2>V26</h2><p><a href='/force-login'>Force Login</a></p>"
+def callback(): return f"<h2>V26FIX</h2><p><a href='/force-login'>Force Login</a></p>"
 @app.route('/setcode', methods=['GET','POST'])
-def setcode(): return f"""<h2>V26</h2><p>Login: {state['login']}</p><p><a href='/force-login'>Force Login</a> | <a href='/'>Home</a></p>"""
+def setcode(): return f"""<h2>V26FIX</h2><p>Login: {state['login']}</p><p><a href='/force-login'>Force Login</a> | <a href='/'>Home</a></p>"""
 if __name__=='__main__':
     port=int(os.environ.get("PORT",10000)); print(f"Starting PORT {port} MODE {MODE}",flush=True); app.run(host='0.0.0.0', port=port)
