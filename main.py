@@ -11,7 +11,7 @@ STORE={"session":None}
 def home():
     auth_url=f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
     s=STORE.get("session")
-    return f"<h1>V57 - Discovery</h1><p>User:{USER_ID}</p><p>Session: {'YES' if s else 'ILLA'}</p><p><a href='{auth_url}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/test'><b>4. TEST - Full Discovery</b></a></p>"
+    return f"<h1>V58 - Pudhu API - open-api</h1><p>User:{USER_ID}</p><p>Session: {'YES' if s else 'ILLA'}</p><p><a href='{auth_url}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/test'><b>4. TEST - Holdings / Positions / Funds</b></a></p>"
 @app.route('/manual')
 def manual():
     return """<h1>AuthCode</h1><form action='/exchange'><input name='authCode' placeholder='AuthCode' style='width:320px'><button>EXCHANGE</button></form><br><a href='/'>Home</a>"""
@@ -32,7 +32,7 @@ def exchange():
         sess=r.json().get("userSession")
         if sess:
             STORE["session"]=str(sess)
-            return "<h2 style='color:green'>SUCCESS! Session Saved!</h2><p><a href='/test'><b>CLICK - TEST Discovery</b></a></p>"
+            return "<h2 style='color:green'>SUCCESS! Session Saved!</h2><p><a href='/test'><b>CLICK - TEST</b></a></p>"
         else: return f"<b>Session Illa - {r.text[:500]}</b><br><a href='/'>Home</a>"
     except Exception as e: return f"Err {e} <br><a href='/'>Home</a>"
 @app.route('/dashboard')
@@ -45,7 +45,7 @@ def dashboard():
     try:
         r=requests.get(f"{BASE}/api/customer/accountDetails", headers=h, params={"userId":USER_ID}, timeout=8)
         j=r.json()
-        return f"<h1>Vanakkam {j.get('accountName')}</h1><p>Account: {j.get('accountId')} | Status: {j.get('accountStatus')} | Broker: {j.get('sBrokerName')}</p><p>Mobile: {j.get('cellAddr')} | Email: {j.get('emailAddr')}</p><p>Products: {j.get('product')}</p><p><a href='/test'>TEST</a></p><br><a href='/'>Home</a>"
+        return f"<h1>Vanakkam {j.get('accountName')}</h1><p>Account: {j.get('accountId')} | Status: {j.get('accountStatus')} | Broker: {j.get('sBrokerName')}</p><p>Mobile: {j.get('cellAddr')} | Email: {j.get('emailAddr')}</p><p><a href='/test'>TEST - Holdings</a></p><br><a href='/'>Home</a>"
     except Exception as e: return f"Err {e}"
 @app.route('/test')
 def test():
@@ -53,44 +53,34 @@ def test():
     sess=STORE.get("session")
     if not sess: return "<h1>Session Illa - Login pannunga!</h1><a href='/'>Home</a>"
     h={"Authorization":f"Bearer {sess}","Content-Type":"application/json","Accept":"application/json"}
-    BASE="https://ant.aliceblueonline.com/rest/AliceBlueAPIService"
-    out=["<h1>V57 DISCOVERY - Compact</h1><p>404 = Path Illa | 200 + JSON = FOUND | 401 = Auth thappu</p>"]
-    # Vera vera BASE try pannuvom
-    bases=[
-        ("cust", f"{BASE}/api/customer/"),
-        ("api", f"{BASE}/api/"),
-        ("root", f"{BASE}/"),
-        ("posHold", f"{BASE}/api/positionAndHoldings/"),
-        ("sso", f"{BASE}/sso/"),
+    BASE="https://ant.aliceblueonline.com"
+    out=["<h1>V58 TEST - Pudhu open-api</h1>"]
+    # 10 mattum - Light!
+    cands=[
+        ("Holdings CNC","GET",f"{BASE}/open-api/od/v1/holdings/CNC",None),
+        ("Holdings MTF","GET",f"{BASE}/open-api/od/v1/holdings/MTF",None),
+        ("Positions","GET",f"{BASE}/open-api/od/v1/positions",None),
+        ("Funds","GET",f"{BASE}/open-api/od/v1/funds",None),
+        ("Limits","GET",f"{BASE}/open-api/od/v1/limits",None),
+        ("OrderBook","GET",f"{BASE}/open-api/od/v1/orders",None),
+        ("TradeBook","GET",f"{BASE}/open-api/od/v1/trades",None),
+        ("Profile","GET",f"{BASE}/open-api/od/v1/profile",None),
+        ("Holdings POST","POST",f"{BASE}/open-api/od/v1/holdings", {"userId":USER_ID}),
+        ("Positions POST","POST",f"{BASE}/open-api/od/v1/positions", {"userId":USER_ID}),
     ]
-    names=["holdings","getHoldings","positions","getPositions","positionBook","getPositionBook",
-           "daywisePositions","holdingsBook","orderBook","getOrderBook","tradeBook","getTradeBook",
-           "funds","getFunds","limits","getLimits","margin","fundsAndMargins","profile",
-           "accountDetails","netPositions","squareoff","orderHistory","holdingsAndPositions"]
-    for bname, burl in bases:
-        out.append(f"<h2>BASE: {bname} - {burl}</h2>")
-        for n in names:
-            url=burl+n
-            try:
-                # GET - Compact
-                r=requests.get(url, headers=h, params={"userId":USER_ID}, timeout=6)
-                txt=(r.text or "").strip()
-                is_json=txt.startswith("{") or txt.startswith("[")
-                snippet=txt[:220].replace("<","&lt;") if is_json else f"HTML Len:{len(txt)}"
-                ok=(r.status_code==200 and is_json)
-                out.append(f"<p>{'✅' if ok else '❌'} GET {n} Status:{r.status_code} JSON:{is_json} {snippet}</p>")
-                if ok: out.append(f"<h3 style='color:green'>FOUND GET! {bname}/{n}</h3>")
-                # POST - GET 404 / fail aana mattum
-                if not ok:
-                    r2=requests.post(url, headers=h, json={"userId":USER_ID}, timeout=6)
-                    txt2=(r2.text or "").strip()
-                    is_json2=txt2.startswith("{") or txt2.startswith("[")
-                    snippet2=txt2[:220].replace("<","&lt;") if is_json2 else f"HTML Len:{len(txt2)}"
-                    ok2=(r2.status_code==200 and is_json2)
-                    out.append(f"<p>{'✅' if ok2 else '❌'} POST {n} Status:{r2.status_code} JSON:{is_json2} {snippet2}</p>")
-                    if ok2: out.append(f"<h3 style='color:green'>FOUND POST! {bname}/{n}</h3>")
-            except Exception as e:
-                out.append(f"<p>❌ {n} Err:{str(e)[:100]}</p>")
+    for name, method, url, payload in cands:
+        try:
+            if method=="GET":
+                r=requests.get(url, headers=h, params={"userId":USER_ID}, timeout=5)
+            else:
+                r=requests.post(url, headers=h, json=payload, timeout=5)
+            txt=(r.text or "")
+            is_json=txt.strip().startswith("{") or txt.strip().startswith("[")
+            ok=(r.status_code==200 and is_json)
+            out.append(f"<p>{'✅' if ok else '❌'} {name} Status:{r.status_code} JSON:{is_json} Body:{txt[:800].replace('<','&lt;')}</p>")
+            if ok: out.append(f"<h2 style='color:green'>FOUND! {name}</h2>")
+        except Exception as e:
+            out.append(f"<p>❌ {name} Err:{str(e)[:150]}</p>")
     return "<br>".join(out)+"<br><a href='/'>Home</a> | <a href='/dashboard'>Dashboard</a>"
 if __name__=='__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT",10000)))
