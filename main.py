@@ -42,7 +42,7 @@ def log(m):
 def home():
     auth = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
     s = STORE.get("session")
-    return f"<h1>V66 - FULLY AUTO - ITM 1 - ORDER URL FIXED</h1><p>Session: {'YES' if s else 'ILLA'}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
+    return f"<h1>V67 - FULLY AUTO - ITM 1 - PAZHAYA URL FIXED</h1><p>Session: {'YES' if s else 'ILLA'}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
 
 @app.route('/manual')
 def manual():
@@ -106,7 +106,7 @@ def get_ltp():
     except:
         return None
 
-# ---------- ORDER FUNCTIONS - V66 FIX ✅ - placeOrder + Safe JSON ----------
+# ---------- ORDER FUNCTIONS - V67 FIX ✅ - PAZHAYA ANT API - executePlaceOrder ----------
 def place_buy(strike, opt_type):
     import requests
     sess = STORE.get("session")
@@ -114,10 +114,8 @@ def place_buy(strike, opt_type):
         return {"error": "No Session"}
     h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
     payload = {
-        "complexity": "REGULAR",
-        "discQty": 0,
         "exch": "NFO",
-        "pCode": "INTRADAY",
+        "pCode": "MIS",
         "price": 0,
         "priceType": "MARKET",
         "qty": 65,
@@ -128,12 +126,12 @@ def place_buy(strike, opt_type):
         "orderTag": "VIJAYAN_ITM1"
     }
     try:
-        r = requests.post("https://ant.aliceblueonline.com/open-api/od/v1/orders/placeOrder", headers=h, json=payload, timeout=10)
-        log(f"BUY ORDER {strike}{opt_type} Status:{r.status_code} Resp:{r.text[:500]}")
+        r = requests.post("https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/placeOrder/executePlaceOrder", headers=h, json=payload, timeout=10)
+        log(f"BUY ORDER {strike}{opt_type} Status:{r.status_code} Resp:{r.text[:600]}")
         try:
             return r.json()
         except:
-            return {"raw": r.text[:500], "status": r.status_code}
+            return {"raw": r.text[:600], "status": r.status_code}
     except Exception as e:
         log(f"Order Err {e}")
         return {"error": str(e)}
@@ -145,10 +143,8 @@ def place_sell(strike, opt_type):
         return {"error": "No Session"}
     h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
     payload = {
-        "complexity": "REGULAR",
-        "discQty": 0,
         "exch": "NFO",
-        "pCode": "INTRADAY",
+        "pCode": "MIS",
         "price": 0,
         "priceType": "MARKET",
         "qty": 65,
@@ -159,12 +155,12 @@ def place_sell(strike, opt_type):
         "orderTag": "VIJAYAN_ITM1_EXIT"
     }
     try:
-        r = requests.post("https://ant.aliceblueonline.com/open-api/od/v1/orders/placeOrder", headers=h, json=payload, timeout=10)
-        log(f"SELL ORDER {strike}{opt_type} Status:{r.status_code} Resp:{r.text[:500]}")
+        r = requests.post("https://ant.aliceblueonline.com/rest/AliceBlueAPIService/api/placeOrder/executePlaceOrder", headers=h, json=payload, timeout=10)
+        log(f"SELL ORDER {strike}{opt_type} Status:{r.status_code} Resp:{r.text[:600]}")
         try:
             return r.json()
         except:
-            return {"raw": r.text[:500], "status": r.status_code}
+            return {"raw": r.text[:600], "status": r.status_code}
     except Exception as e:
         log(f"Sell Err {e}")
         return {"error": str(e)}
@@ -309,7 +305,7 @@ def testorder():
     otype = request.args.get("type", "CE")
     log(f"🧪 IPPAVE TEST ORDER - BUY {strike}{otype} - 1 Lot - Real API Call!")
     res = place_buy(strike, otype)
-    log(f"🧪 TEST ORDER Resp: {str(res)[:500]}")
+    log(f"🧪 TEST ORDER Resp: {str(res)[:600]}")
     return redirect("/dashboard")
 
 @app.route('/debug')
