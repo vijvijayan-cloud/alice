@@ -1,4 +1,4 @@
-import os, time, traceback, hashlib, json, base64, glob, tempfile
+import os, time, traceback, hashlib, json, base64
 from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, request, redirect
 import threading
@@ -36,7 +36,6 @@ except: LOTS=1
 LOT_SIZE=65
 
 HOST="https://ant.aliceblueonline.com/rest/AliceBlueAPIService"
-HOST2="https://v2api.aliceblueonline.com/restpy"
 URLS={
   "getEncpkey": f"{HOST}/sso/getEncryptionKey",
   "webLogin": f"{HOST}/sso/webLogin",
@@ -46,7 +45,7 @@ URLS={
   "placeOrder": f"{HOST}/api/placeOrder/executePlaceOrder",
 }
 
-state={"strategy":"NIFTY_2ND_CANDLE_FLIP","mode":MODE,"login":"STARTING...","nifty_price":0,"signal":"WAITING FOR 9:20","in_trade":False,"side":"","entry":0,"pnl":0,"reason":"","last_update":"","candle1":"","candle2":"","live_order":"","debug":"Waiting...","session_id":"","real_session":"","api_version":"V23_RAW_DEBUG","test_order_result":"","lot_size":LOT_SIZE,"raw_login":""}
+state={"strategy":"NIFTY_2ND_CANDLE_FLIP","mode":MODE,"login":"STARTING...","nifty_price":0,"signal":"WAITING FOR 9:20","in_trade":False,"side":"","entry":0,"pnl":0,"reason":"","last_update":"","candle1":"","candle2":"","live_order":"","debug":"Waiting...","session_id":"","real_session":"","api_version":"V24_WEBLOGIN_MINIMAL","test_order_result":"","lot_size":LOT_SIZE,"raw_login":""}
 
 def get_ist(): return datetime.now(timezone.utc)+timedelta(hours=5,minutes=30)
 session_id_global=""; real_session_global=""; last_login_try=0
@@ -97,16 +96,11 @@ def sdk_aes(plain_str, key_str):
         print(f"SDK AES Fail {e}",flush=True)
     return my_aes(plain_str, key_str)
 
-def safe_post(url, payload, use_json=True):
-    # Raw response-a thiruppi tharum - JSON crash aagadhu
+def safe_post(url, payload):
     try:
         headers={"Content-Type":"application/json","User-Agent":"Mozilla/5.0","Accept":"application/json"}
-        if use_json:
-            r=requests.post(url, json=payload, headers=headers, timeout=20)
-        else:
-            r=requests.post(url, data=json.dumps(payload), headers=headers, timeout=20)
-        txt=r.text or ""
-        return r.status_code, txt[:1000], r.headers.get("Content-Type","")
+        r=requests.post(url, json=payload, headers=headers, timeout=20)
+        return r.status_code, r.text or "", r.headers.get("Content-Type","")
     except Exception as e:
         return 0, f"REQUEST ERR: {e}", ""
 
@@ -114,80 +108,85 @@ def sdk_flow_login():
     out=[]
     totp_now=get_totp()
     out.append(f"USER:{USER_ID} APP:{APP_ID} DOB:{DOB_YEAR} TOTP:{totp_now} MODE:{MODE}")
-    # 0. Server Uyirla Irukka-nu Check - Idhu thaan Mukkiyam
-    for name, url in [("HOST",HOST),("HOST2",HOST2)]:
-        try:
-            r=requests.get(url, timeout=10)
-            out.append(f"CHECK {name} GET {url} Status:{r.status_code} Len:{len(r.text)} Body:{r.text[:300]}")
-        except Exception as e:
-            out.append(f"CHECK {name} Fail:{e}")
-    header={"Content-Type":"application/json"}
     for tfa_label, tfa_val in [("DOB",DOB_YEAR),("TOTP",totp_now)]:
         if not tfa_val: continue
         try:
             out.append(f"<b>=== TRY {tfa_label}={tfa_val} ===</b>")
-            # STEP1 - getEncpkey - RAW paaru
-            code, txt, ctype = safe_post(URLS["getEncpkey"], {"userId":USER_ID}, True)
-            out.append(f"STEP1 getEncpkey Status:{code} ContentType:{ctype} Len:{len(txt)} Body:{txt[:600]}")
-            print(f"STEP1 {code} {txt[:600]}",flush=True)
-            if code!=200 or not txt.strip().startswith("{"):
-                out.append(f"STEP1 FAIL - Server JSON tharala. Body empty-a? Cloudflare block-a? Next Try")
-                # HOST2 try
-                code2, txt2, _ = safe_post(f"{HOST2}/getEncryptionKey", {"userId":USER_ID}, True)
-                out.append(f"STEP1 HOST2 Status:{code2} Body:{txt2[:400]}")
-                continue
+            # STEP1
+            code, txt, ctype = safe_post(URLS["getEncpkey"], {"userId":USER_ID})
+            out.append(f"STEP1 getEncpkey Status:{code} Body:{txt[:500]}")
+            if code!=200 or not txt.strip().startswith("{"): continue
             try: j1=json.loads(txt)
             except: continue
-            encKey=j1.get("encKey") or j1.get("encpkey") or ""
-            if not encKey:
-                out.append(f"STEP1 encKey Illa Keys:{list(j1.keys())}")
-                continue
+            encKey=j1.get("encKey") or ""
+            if not encKey: continue
             out.append(f"STEP1 encKey OK:{str(encKey)[:10]}***")
-            # STEP2
+            # STEP2 - FIXED: 2 FIELD MATTUM! twoFA, app_id, api_secret ILLA!
             checksum=sdk_aes(PASSWORD, str(encKey))
-            if not checksum:
-                out.append("STEP2 AES Fail")
+            if not checksum: continue
+            out.append(f"STEP2 AES OK Len:{len(checksum)}")
+            data2={"userId":USER_ID,"userData":checksum}
+            code, txt, _ = safe_post(URLS["webLogin"], data2)
+            out.append(f"STEP2 webLogin MINIMAL Status:{code} Body:{txt[:1000]}")
+            print(f"STEP2 {code} {txt[:1000]}",flush=True)
+            if code!=200:
+                out.append(f"STEP2 FAIL Status {code} - Body mela paaru")
                 continue
-            out.append(f"STEP2 AES OK Len:{len(checksum)} Start:{str(checksum)[:20]}")
-            data2={"userId":USER_ID,"userData":checksum,"twoFA":str(tfa_val),"app_id":APP_ID,"api_secret":APP_SECRET}
-            code, txt, _ = safe_post(URLS["webLogin"], data2, True)
-            out.append(f"STEP2 webLogin Status:{code} Len:{len(txt)} Body:{txt[:800]}")
-            print(f"STEP2 {code} {txt[:800]}",flush=True)
-            if code!=200 or not txt.strip().startswith("{"):
-                out.append("STEP2 FAIL - Server JSON tharala")
-                continue
-            # STEP3
-            data3={"answer":str(tfa_val),"count":"1","vendor":APP_ID,"userId":USER_ID}
-            code, txt, _ = safe_post(URLS["twoFA"], data3, True)
-            out.append(f"STEP3 twoFA Status:{code} Len:{len(txt)} Body:{txt[:800]}")
-            print(f"STEP3 {code} {txt[:800]}",flush=True)
-            if code!=200 or not txt.strip().startswith("{"): continue
-            try: j3=json.loads(txt)
-            except: continue
-            out.append(f"STEP3 Keys:{list(j3.keys())} isAuthorized:{j3.get('isAuthorized')}")
-            if not j3.get("isAuthorized"):
-                out.append(f"STEP3 isAuthorized False - Password/DOB Thappu. Full:{j3}")
-                continue
-            ru=j3.get("redirectUrl") or ""
-            auth_code=""
-            if ru:
+            # webLogin success-a? JSON-a irundha paaru, illa text-a irundhalum OK
+            web_ok=False
+            if txt.strip().startswith("{"):
                 try:
-                    q=parse_qs(urlparse(ru).query)
-                    if "authCode" in q: auth_code=q["authCode"][0]
-                except: pass
-            if not auth_code: auth_code=j3.get("authCode") or ""
+                    j2=json.loads(txt)
+                    out.append(f"STEP2 JSON Keys:{list(j2.keys())}")
+                    web_ok=True
+                except: web_ok=True
+            else:
+                # Text response vandhalum next step try pannu
+                web_ok=True
+            if not web_ok: continue
+            # STEP3 - twoFA - 3 format try pannu - edhu work aagudhu nu paappom
+            twofa_payloads=[
+                {"answer":str(tfa_val),"count":"1","vendor":APP_ID,"userId":USER_ID},
+                {"answer":str(tfa_val),"userId":USER_ID},
+                {"userId":USER_ID,"answer":str(tfa_val)},
+            ]
+            auth_code=""; j3=None
+            for pi, data3 in enumerate(twofa_payloads):
+                code, txt, _ = safe_post(URLS["twoFA"], data3)
+                out.append(f"STEP3 twoFA P{pi} Payload:{data3} Status:{code} Body:{txt[:1000]}")
+                print(f"STEP3 P{pi} {code} {txt[:1000]}",flush=True)
+                if code==200 and txt.strip().startswith("{"):
+                    try:
+                        j3=json.loads(txt)
+                        out.append(f"STEP3 P{pi} Keys:{list(j3.keys())} isAuthorized:{j3.get('isAuthorized')}")
+                        if j3.get("isAuthorized"):
+                            ru=j3.get("redirectUrl") or ""
+                            if ru:
+                                try:
+                                    q=parse_qs(urlparse(ru).query)
+                                    if "authCode" in q: auth_code=q["authCode"][0]
+                                except: pass
+                            if not auth_code: auth_code=j3.get("authCode") or ""
+                            break
+                        else:
+                            out.append(f"STEP3 P{pi} isAuthorized False - Next payload try")
+                            continue
+                    except: continue
+                else:
+                    out.append(f"STEP3 P{pi} FAIL - Next payload try")
+                    continue
             if not auth_code:
-                out.append(f"STEP3 authCode Illa Full:{j3}")
+                out.append(f"STEP3 authCode Illa - Full:{j3}")
                 continue
             out.append(f"STEP3 authCode OK:{auth_code[:12]}***")
             # STEP4
-            code, txt, _ = safe_post(URLS["apiGetEncpkey"], {"userId":USER_ID}, False)
+            code, txt, _ = safe_post(URLS["apiGetEncpkey"], {"userId":USER_ID})
             out.append(f"STEP4 apiGetEncpkey Status:{code} Body:{txt[:300]}")
-            # STEP5
+            # STEP5 - checksum = SHA256(username+authCode+secret) - SDK exact
             checksum2=hashlib.sha256(f"{USER_ID}{auth_code}{APP_SECRET}".encode()).hexdigest()
-            code, txt, _ = safe_post(URLS["sessionID"], {"checksum":checksum2}, False)
+            out.append(f"STEP5 checksum:{checksum2[:12]}***")
+            code, txt, _ = safe_post(URLS["sessionID"], {"checksum":checksum2})
             out.append(f"STEP5 sessionID Status:{code} Body:{txt[:800]}")
-            print(f"STEP5 {code} {txt[:800]}",flush=True)
             if code!=200 or not txt.strip().startswith("{"): continue
             try: j5=json.loads(txt)
             except: continue
@@ -207,19 +206,18 @@ def alice_login_v2():
     global session_id_global, real_session_global, last_login_try
     last_login_try=time.time()
     try:
-        # Manual session irundha adha use pannu - Login thevai illa
         if real_session_global and is_valid_key(real_session_global):
             state["login"]=f"LIVE READY - Manual Session - User {USER_ID[:3]}***"
             return True
         raw, token = sdk_flow_login()
         state["raw_login"]=raw
-        state["debug"]=f"V23 RAW USER:{USER_ID} DOB:{DOB_YEAR} TOTP:{get_totp()}"
+        state["debug"]=f"V24 MINIMAL USER:{USER_ID} DOB:{DOB_YEAR} TOTP:{get_totp()}"
         if token and is_valid_key(token):
             session_id_global=token; real_session_global=token
             state["session_id"]=token[:12]+"***"; state["real_session"]=token[:12]+"***"
-            state["login"]=f"LIVE READY V23 - User {USER_ID[:3]}*** - LOT 65"
+            state["login"]=f"LIVE READY V24 - User {USER_ID[:3]}*** - LOT 65"
             return True
-        state["login"]=f"LOGIN FAIL - /test la STEP1 Body Paaru - Server Enna Tharudhu?"
+        state["login"]=f"LOGIN FAIL - /test la STEP3 isAuthorized Paaru"
         return False
     except Exception as e:
         print(traceback.format_exc(),flush=True)
@@ -269,7 +267,7 @@ def place_trade(side, price, nifty_price):
                 if not real_session_global and not session_id_global: state["reason"]="LIVE FAILED - No Session"; state["live_order"]="FAILED - No Session"; state["in_trade"]=False; return
             strike=round(float(nifty_price)/50)*50; qty=LOT_SIZE*LOTS
             code,body,url=place_order_direct_v2(strike,side,qty)
-            state["reason"]=f"LIVE ORDER V23 - NIFTY {strike} {side} x {LOTS} Lot (Qty {qty}) - Status:{code}"; state["live_order"]=f"V23 - URL:{url} Status:{code} Body:{body}"
+            state["reason"]=f"LIVE ORDER V24 - NIFTY {strike} {side} x {LOTS} Lot (Qty {qty}) - Status:{code}"; state["live_order"]=f"V24 - URL:{url} Status:{code} Body:{body}"
         except Exception as e: state["reason"]=f"LIVE ORDER FAILED:{e}"; state["live_order"]=f"FAILED:{e}"
 trade_done_today=""
 def bot_loop():
@@ -304,11 +302,11 @@ try: threading.Thread(target=bot_loop, daemon=True).start()
 except Exception as e: print(f"Thread Error:{e}",flush=True)
 @app.route('/')
 def home():
-    return f"""<h1>ALICE BOT - {state['mode']} - V23 RAW DEBUG</h1><p>Time: {state['last_update']}</p><p>Login: {state['login']} | Mode: <b>{state['mode']}</b> | Lot: <b>{LOT_SIZE}</b></p><p>Signal: {state['signal']}</p><p>Candle1: {state['candle1']}</p><p>Candle2: {state['candle2']}</p><p>In Trade: {state['in_trade']} Side: {state['side']} Entry: {state['entry']}</p><p>Reason: {state['reason']}</p><p>Live Order: {state['live_order']}</p><p>Test: {state['test_order_result']}</p><p>Session: {state['session_id']}</p><hr><h3 style='color:red'>REAL TEST ORDER - 65 QTY</h3><p><a href='/test-order-confirm' style='background:orange; padding:10px; color:black;'><b>TEST ORDER - NIFTY ATM CE - 65 QTY</b></a></p><hr><p><a href='/force-login'><b>/force-login</b></a> | <a href='/test'>/test</a> | <a href='/status'>STATUS</a> | <a href='/set-session'>Manual Session Paste</a></p><hr><h3>DEBUG:</h3><p>{state['debug']}</p><h3>RAW:</h3><p>{state['raw_login']}</p><script>setTimeout(()=>location.reload(),10000)</script>"""
+    return f"""<h1>ALICE BOT - {state['mode']} - V24 WEBLOGIN MINIMAL</h1><p>Time: {state['last_update']}</p><p>Login: {state['login']} | Mode: <b>{state['mode']}</b> | Lot: <b>{LOT_SIZE}</b></p><p>Signal: {state['signal']}</p><p>Candle1: {state['candle1']}</p><p>Candle2: {state['candle2']}</p><p>In Trade: {state['in_trade']} Side: {state['side']} Entry: {state['entry']}</p><p>Reason: {state['reason']}</p><p>Live Order: {state['live_order']}</p><p>Test: {state['test_order_result']}</p><p>Session: {state['session_id']}</p><hr><h3 style='color:red'>REAL TEST ORDER - 65 QTY</h3><p><a href='/test-order-confirm' style='background:orange; padding:10px; color:black;'><b>TEST ORDER - NIFTY ATM CE - 65 QTY</b></a></p><hr><p><a href='/force-login'><b>/force-login</b></a> | <a href='/test'>/test</a> | <a href='/status'>STATUS</a> | <a href='/set-session'>Manual Session</a></p><hr><h3>DEBUG:</h3><p>{state['debug']}</p><h3>RAW:</h3><p>{state['raw_login']}</p><script>setTimeout(()=>location.reload(),10000)</script>"""
 @app.route('/force-login')
 def force_login():
     ok=alice_login_v2()
-    return f"<h2>Force Login V23</h2><p>Result: {state['login']}</p><p>Debug: {state['debug']}</p><hr><h3>RAW:</h3><p>{state['raw_login']}</p><p><a href='/'>Home</a> | <a href='/test-order-confirm'>Test Order</a></p>"
+    return f"<h2>Force Login V24</h2><p>Result: {state['login']}</p><p>Debug: {state['debug']}</p><hr><h3>RAW:</h3><p>{state['raw_login']}</p><p><a href='/'>Home</a> | <a href='/test-order-confirm'>Test Order</a></p>"
 @app.route('/set-session')
 def set_session_page():
     sess=request.args.get("s","").strip()
@@ -318,7 +316,7 @@ def set_session_page():
         state["session_id"]=sess[:12]+"***"; state["real_session"]=sess[:12]+"***"
         state["login"]=f"LIVE READY - Manual Session - User {USER_ID[:3]}***"
         return f"<h2>Manual Session Saved ✅</h2><p>Session: {sess[:12]}***</p><p><a href='/'>Home</a> | <a href='/test-order-confirm'>Test Order</a></p>"
-    return f"""<h2>Manual Session Paste - Login Bypass</h2><p>Login work aagalana idha use pannunga. Browser la AliceBlue login pannitu session_id-a inga paste pannunga.</p><form><input name='s' placeholder='session_id paste pannunga' style='width:400px;padding:10px'><br><br><button style='padding:10px 20px;background:green;color:white'>SAVE SESSION</button></form><p><a href='/'>Home</a></p>"""
+    return f"""<h2>Manual Session Paste</h2><form><input name='s' placeholder='session_id' style='width:400px;padding:10px'><br><br><button style='padding:10px 20px;background:green;color:white'>SAVE SESSION</button></form><p><a href='/'>Home</a></p>"""
 @app.route('/test-order-confirm')
 def test_order_confirm():
     nifty=get_nifty_price(); strike=round(float(nifty)/50)*50 if nifty else 0
@@ -337,18 +335,18 @@ def test_order_do():
     elif "401" in str(code) or "invalid" in bl: interp="<h3 style='color:red'>❌ FAIL - Session Problem</h3>"
     elif code==200: interp="<h3 style='color:green'>✅ ORDER PLACED!</h3>"
     else: interp=f"<h3>Status {code} - Screenshot Anuppunga</h3>"
-    return f"""<h2>REAL TEST ORDER RESULT - V23 - LOT 65</h2><p>Nifty:{nifty} Strike:{strike} CE Qty:{qty}</p><p>URL:{url}</p><p>Status:{code}</p><p>Body:{body}</p><hr>{interp}<hr><p><a href='/'>Home</a></p>"""
+    return f"""<h2>REAL TEST ORDER RESULT - V24 - LOT 65</h2><p>Nifty:{nifty} Strike:{strike} CE Qty:{qty}</p><p>URL:{url}</p><p>Status:{code}</p><p>Body:{body}</p><hr>{interp}<hr><p><a href='/'>Home</a></p>"""
 @app.route('/test')
 def test_encpkey():
     raw, token = sdk_flow_login()
-    return f"<h2>Test V23 - Raw Debug</h2><p>{raw}</p><p>Token: {str(token)[:12] if token else 'NONE'}</p><br><a href='/'>Home</a> | <a href='/force-login'>Force Login</a> | <a href='/set-session'>Manual Session</a>"
+    return f"<h2>Test V24 - webLogin Minimal</h2><p>{raw}</p><p>Token: {str(token)[:12] if token else 'NONE'}</p><br><a href='/'>Home</a> | <a href='/force-login'>Force Login</a>"
 @app.route('/status')
 def status(): return jsonify(state)
 @app.route('/login')
 def login_redirect(): return redirect(f"https://ant.aliceblueonline.com/?appcode={APP_ID}")
 @app.route('/callback')
-def callback(): return f"<h2>V23</h2><p><a href='/force-login'>Force Login</a></p>"
+def callback(): return f"<h2>V24</h2><p><a href='/force-login'>Force Login</a></p>"
 @app.route('/setcode', methods=['GET','POST'])
-def setcode(): return f"""<h2>V23</h2><p>Login: {state['login']}</p><p><a href='/force-login'>Force Login</a> | <a href='/'>Home</a></p>"""
+def setcode(): return f"""<h2>V24</h2><p>Login: {state['login']}</p><p><a href='/force-login'>Force Login</a> | <a href='/'>Home</a></p>"""
 if __name__=='__main__':
     port=int(os.environ.get("PORT",10000)); print(f"Starting PORT {port} MODE {MODE}",flush=True); app.run(host='0.0.0.0', port=port)
