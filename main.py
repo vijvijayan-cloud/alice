@@ -23,7 +23,7 @@ BOT = {
     "status": "STOPPED",
     "mode": "LIVE - FULLY AUTO - ITM 1",
     "symbol": "NIFTY",
-    "qty": 60,
+    "qty": 65,
     "high": None,
     "low": None,
     "candle_locked": False,
@@ -61,14 +61,12 @@ def build_symbol(strike, opt_type):
     log(f"Symbol Build: Spaced=[{spaced}] Compact=[{compact}] Expiry:{exp} (TUESDAY)")
     return spaced, compact
 
-# ---------- V74 FIX ✅ - JSON Parse + Lot 60 + Token + formatted_ins_name ----------
+# ---------- V75 FIX ✅ - Lot 65 FIXED - Vera Index Lot-a Edukka Koodadhu! ----------
 def get_symbol_info(strike, opt_type):
     import requests
     spaced, compact = build_symbol(strike, opt_type)
     if compact in STORE["symbol_cache"]:
-        return STORE["symbol_cache"][compact], STORE["spaced_cache"].get(compact, spaced), STORE["lot_cache"].get(compact, 60)
-    # 17NOV26 = Timestamp? - Expiry Date-a Compare Panna - Strike + Type + NIFTY nu Compare Pannu!
-    # Expiry 17 Nov 2026 - Timestamp ms: 179... - Direct-a Strike + Type + NIFTY la Thedu!
+        return STORE["symbol_cache"][compact], STORE["spaced_cache"].get(compact, spaced), 65
     try:
         urls = [
             "https://v2api.aliceblueonline.com/restpy/contract_master?exch=NFO",
@@ -81,8 +79,6 @@ def get_symbol_info(strike, opt_type):
                 log(f"Contract Master {url} Status:{r.status_code} Len:{len(txt)}")
                 if r.status_code != 200 or len(txt) < 1000:
                     continue
-                # Line-by-Line JSON Parse!
-                count = 0
                 for line in txt.splitlines():
                     line = line.strip()
                     if not line.startswith("{"):
@@ -91,75 +87,65 @@ def get_symbol_info(strike, opt_type):
                         j = json.loads(line)
                     except:
                         continue
-                    # NIFTY Option mattum - OPTIDX + CE/PE
                     if j.get("instrument_type") != "OPTIDX":
                         continue
                     if str(j.get("option_type", "")).upper() != opt_type:
                         continue
-                    # Strike Compare - "24450" vs 24450
                     try:
                         if int(float(str(j.get("strike_price", "0")))) != int(strike):
                             continue
                     except:
                         continue
-                    # Symbol Name la NIFTY Irukkanum - BANKNIFTY / FINNIFTY Koodadhu!
                     fname = str(j.get("formatted_ins_name", "")) + " " + str(j.get("trading_symbol", "")) + " " + str(j.get("symbol", ""))
-                    # BANKNIFTY / FINNIFTY / MIDCPNIFTY - Skip pannu!
                     up = fname.upper()
+                    # ✅ STRICT NIFTY CHECK - BANKNIFTY / FINNIFTY / MIDCPNIFTY / NXT50 - ELLAM SKIP!
+                    # NIFTY nu Irundha Mattum Podhadhu - "NIFTY " nu Space-oda Irukkanum - Illa na BANKNIFTY!
+                    # formatted_ins_name - "NIFTY 17NOV26..." nu Start Aaganum!
+                    fname_clean = str(j.get("formatted_ins_name", "")).strip().upper()
+                    if not fname_clean.startswith("NIFTY "):
+                        continue
                     if "BANKNIFTY" in up or "FINNIFTY" in up or "MIDCP" in up or "NXT50" in up:
                         continue
-                    if "NIFTY" not in up:
-                        continue
-                    # Expiry Check - 17NOV26 Irukkanum - Illa na - Monthly Contract-a Irukkalam!
-                    # formatted_ins_name la - 17NOV26 / 17 Nov / 179... - Check pannu!
-                    # 17NOV26 Illa na - Skip pannu - Vera Expiry Contract!
+                    # Expiry Check - 17NOV26
                     if "17NOV26" not in up and "17NOV" not in up:
-                        # Expiry Timestamp Check - 17 Nov 2026 = 1794364800000 ms (approx)
-                        # Timestamp la - 17 Nov 2026 ku Pakkathula Irundha - OK
                         try:
                             exp_ms = int(j.get("expiry_date", 0))
                             exp_dt = datetime.fromtimestamp(exp_ms/1000, tz=IST)
-                            log(f"Check Expiry: {exp_dt} for Strike {strike} {opt_type} Name:{fname[:80]}")
                             if exp_dt.strftime("%d%b%y").upper() != "17NOV26":
                                 continue
                         except:
                             continue
-                    count += 1
-                    log(f"✅ MATCH JSON: {str(j)[:400]}")
-                    # Token - Vera Vera Field Names la Thedu!
+                    log(f"✅ MATCH JSON: {str(j)[:500]}")
                     token = None
                     for k in ["token", "instrument_token", "symbolId", "Token", "token_number", "exchange_token"]:
                         if k in j and j[k]:
                             token = str(j[k])
                             break
-                    # Real Symbol - formatted_ins_name thaan!
-                    real_sym = j.get("formatted_ins_name") or j.get("trading_symbol") or j.get("symbol") or spaced
-                    real_sym = str(real_sym).strip()
-                    # Lot Size - JSON la irundhu Edu!
-                    try:
-                        lot = int(float(str(j.get("lot_size", 60))))
-                    except:
-                        lot = 60
-                    log(f"✅ symbolId Found: {token} | Real Symbol: [{real_sym}] | Lot: {lot}")
+                    real_sym = str(j.get("formatted_ins_name") or j.get("trading_symbol") or spaced).strip()
+                    # ✅ LOT - NIFTY = 65 FIXED! - Master la Enna Irundhalum - 65 thaan!
+                    # Master la 60 nu Irundha - Adhu Vera Index - Namba Match Strict-a Irundha - 65 thaan Varum!
+                    # Aana Safety ku - Master Lot-a Log la Kaatturen - Use Pannuradhu 65 mattum!
+                    master_lot = j.get("lot_size", "65")
+                    log(f"✅ symbolId Found: {token} | Real Symbol: [{real_sym}] | Master Lot: {master_lot} | Using Lot: 65 (NIFTY FIXED)")
                     STORE["symbol_cache"][compact] = token
                     STORE["spaced_cache"][compact] = real_sym
-                    STORE["lot_cache"][compact] = lot
-                    BOT["qty"] = lot
-                    return token, real_sym, lot
-                log(f"❌ No Match in {url} for {strike} {opt_type} - Checked JSON Lines")
+                    STORE["lot_cache"][compact] = 65
+                    BOT["qty"] = 65
+                    return token, real_sym, 65
+                log(f"❌ No Match in {url} for {strike} {opt_type}")
             except Exception as e:
                 log(f"Contract Master Err {url} {e}")
     except Exception as e:
         log(f"get_symbol_info Err {e}")
-    log(f"⚠️ symbolId Kedaikkala - Spaced Symbol + Lot 60 Use Pannuren!")
-    return None, spaced, 60
+    log(f"⚠️ symbolId Kedaikkala - Spaced Symbol + Lot 65 Use Pannuren!")
+    return None, spaced, 65
 
 @app.route('/')
 def home():
     auth = f"https://ant.aliceblueonline.com/?appcode={APP_ID}"
     s = STORE.get("session")
     now = ist_now().strftime("%H:%M:%S IST - %d %b %Y")
-    return f"<h1>V74 - FULLY AUTO - ITM 1 - JSON + LOT 60 FIX</h1><p>Server Time (IST): {now}</p><p>Session: {'YES' if s else 'ILLA'} | Expiry: {get_expiry()} (TUESDAY) | Lot: {BOT['qty']}</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
+    return f"<h1>V75 - FULLY AUTO - ITM 1 - LOT 65 FIXED</h1><p>Server Time (IST): {now}</p><p>Session: {'YES' if s else 'ILLA'} | Expiry: {get_expiry()} (TUESDAY) | Lot: 65 FIXED</p><p><a href='{auth}'><b>1. LOGIN</b></a></p><p><a href='/manual'><b>2. MANUAL</b></a></p><p><a href='/dashboard'><b>3. DASHBOARD</b></a></p><p><a href='/debug'><b>4. DEBUG</b></a></p><p><b>Strategy: NIFTY 1 Lot = 65 - ITM 1 - First 5Min Breakout - SL 30 + Trailing 1</b></p>"
 
 @app.route('/manual')
 def manual():
@@ -229,9 +215,8 @@ def place_order_api(strike, opt_type, trans):
         return {"error": "No Session"}
     sid, real_sym, lot = get_symbol_info(strike, opt_type)
     spaced, compact = build_symbol(strike, opt_type)
-    # ✅ Lot - Contract Master la irundhu Vandha Lot-a Use Pannu! - 60!
-    qty = lot if lot else 60
-    log(f"Using Qty: {qty} Lot from Master | Token: {sid} | Symbol: [{real_sym}]")
+    qty = 65
+    log(f"Using Qty: {qty} FIXED (NIFTY) | Token: {sid} | Symbol: [{real_sym}]")
     tries = []
     if sid:
         tries.append((real_sym, sid, qty))
@@ -343,9 +328,9 @@ def dashboard():
     now_str = ist_now().strftime("%H:%M:%S IST - %d %b %Y")
     return f"""
     <h1>VIJAYAN ALGO - FULLY AUTO - ITM 1 - NIFTY MOMENTUM</h1>
-    <p><b>Server Time (IST):</b> {now_str} | <b>Funds:</b> Rs.{b['funds']} | <b>Mode:</b> {b['mode']} | <b>Status:</b> {b['status']} | <b>Expiry:</b> {get_expiry()} (TUESDAY) | <b>Lot:</b> {b['qty']}</p>
+    <p><b>Server Time (IST):</b> {now_str} | <b>Funds:</b> Rs.{b['funds']} | <b>Mode:</b> {b['mode']} | <b>Status:</b> {b['status']} | <b>Expiry:</b> {get_expiry()} (TUESDAY) | <b>Lot:</b> 65 FIXED</p>
     <table border=1 cellpadding=8><tr><th>Strategy</th><th>Status</th><th>PNL</th><th>Broker</th></tr>
-    <tr><td>VIJAYAN NIFTY MOMENTUM - 1 LOT - ITM 1 - 5MIN BREAKOUT - AUTO</td><td>{b['status']}</td><td>Rs.{b['pnl']}</td><td>ALICEBLUE</td></tr></table>
+    <tr><td>VIJAYAN NIFTY MOMENTUM - 1 LOT = 65 - ITM 1 - 5MIN BREAKOUT - AUTO</td><td>{b['status']}</td><td>Rs.{b['pnl']}</td><td>ALICEBLUE</td></tr></table>
     <h2>Live Status</h2>
     <p><b>First Candle High:</b> {b['high']} {'✅ LOCKED' if b['candle_locked'] else '🔴 MARKING...'} | <b>Low:</b> {b['low']} {'✅ LOCKED' if b['candle_locked'] else '🔴 MARKING...'}</p>
     <p><b>Entry:</b> {b['entry']} | <b>Type:</b> {b['strike']} {b['type']} | <b>LTP:</b> {b['ltp']} | <b>SL:</b> {b['sl']} (30 Points + Trailing 1)</p>
@@ -407,7 +392,7 @@ def testorder():
         return redirect("/dashboard")
     strike = int(request.args.get("strike", 24450))
     otype = request.args.get("type", "CE")
-    log(f"🧪 IPPAVE TEST ORDER - BUY {strike}{otype} - 1 Lot - Real API Call!")
+    log(f"🧪 IPPAVE TEST ORDER - BUY {strike}{otype} - 1 Lot = 65 - Real API Call!")
     res = place_buy(strike, otype)
     log(f"🧪 TEST ORDER Final Resp: {str(res)[:800]}")
     return redirect("/dashboard")
@@ -416,7 +401,7 @@ def testorder():
 def debug():
     import requests
     sess = STORE.get("session")
-    out = [f"<h1>DEBUG</h1><p>IST Now: {ist_now().strftime('%H:%M:%S IST - %d %b %Y')}</p><p>Session: {'YES - ' + sess[:20] + '...' if sess else 'ILLA - LOGIN pannunga!'}</p><p>Expiry: {get_expiry()} (TUESDAY) | Test Symbol Spaced: {build_symbol(24450, 'CE')[0]} | Lot: {BOT['qty']}</p>"]
+    out = [f"<h1>DEBUG</h1><p>IST Now: {ist_now().strftime('%H:%M:%S IST - %d %b %Y')}</p><p>Session: {'YES - ' + sess[:20] + '...' if sess else 'ILLA - LOGIN pannunga!'}</p><p>Expiry: {get_expiry()} (TUESDAY) | Test Symbol Spaced: {build_symbol(24450, 'CE')[0]} | Lot: 65 FIXED</p>"]
     if sess:
         h = {"Authorization": f"Bearer {sess}", "Content-Type": "application/json"}
         try:
