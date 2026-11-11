@@ -67,6 +67,7 @@ def calc_trailing(entry_prem, current_prem, initial_sl):
     elif current_prem >= entry_prem*1.20: return {"trail_sl": round(entry_prem*1.00,2), "stage": "Trail 1 ✅", "locked_profit": 0, "locked_pct": 0, "status": "Breakeven!"}
     else: return {"trail_sl": initial_sl, "stage": "No Trail Yet", "locked_profit": round((initial_sl-entry_prem),2), "locked_pct": -30, "status": "Initial SL"}
 
+# === BACKTEST - FIXED ===
 def run_backtest(name, days=30, use_trailing=True):
     usdinr = get_usdinr(); sym = SCRIPTS[name]
     try:
@@ -107,20 +108,43 @@ def run_backtest(name, days=30, use_trailing=True):
         elif level==2 and breakout and btype=="DOWN": action="BUY PE"
         else: continue
         entry_spot=price; opt=calc_option(name, entry_spot, action); entry_prem=opt["premium"]; sl_prem=opt["prem_sl"]; tgt_prem=opt["prem_tgt1"]
-        result="OPEN"; exit_prem=entry_prem; exit_reason="Time Exit"; trail_used="No Trail"; max_prem=entry_prem; cur_sl=sl_prem
+        # --- FIXED LOGIC ---
+        result="OPEN"; exit_prem=entry_prem; exit_reason="Time Exit"; trail_used="No Trail"
+        max_prem=entry_prem; cur_sl=sl_prem; last_est=entry_prem; hit_trail=False
         for j in range(i+1, min(i+10, len(candles))):
             fut_price=candles[j]["close"]; spot_move=(fut_price-entry_spot)/entry_spot*100
             if action=="BUY CE": prem_move=spot_move*8
             else: prem_move=-spot_move*8
-            est_prem=max(entry_prem*(1+prem_move/100),1); max_prem=max(max_prem, est_prem)
+            est_prem=max(entry_prem*(1+prem_move/100),1)
+            last_est=est_prem  # FIX 1: Last Premium-a Save Pannuren!
+            max_prem=max(max_prem, est_prem)
+            # Trailing - Profit Vandha Mattum SL Move Aagum
             if use_trailing:
-                tr=calc_trailing(entry_prem, est_prem, sl_prem); cur_sl=max(cur_sl, tr["trail_sl"]); trail_used=tr["stage"]
+                tr=calc_trailing(entry_prem, est_prem, sl_prem)
+                # FIX 2: SL Mela Mattum Pogum, Keela Varadhu - Already max() la Irukku
+                if tr["trail_sl"] > cur_sl:
+                    cur_sl=tr["trail_sl"]; trail_used=tr["stage"]; hit_trail=True
+            # FIX 3: Trailing SL Hit - Aana Initial SL la Illa, Trailing SL la Mattum!
+            # Initial SL Hit na - Loss, Trailing SL Hit na - Profit/BE
             if est_prem <= cur_sl:
-                result="WIN" if cur_sl>entry_prem else "LOSS" if cur_sl<entry_prem else "BREAKEVEN"; exit_prem=cur_sl; exit_reason=f"Trailing SL Hit @ {j-i}"; break
-            if est_prem >= opt["prem_tgt2"]: result="WIN"; exit_prem=opt["prem_tgt2"]; exit_reason=f"TGT2 Hit @ {j-i}"; break
+                # Est Premium SL-ku Keela Pochu - Exit
+                # Exit = cur_sl (SL Price) - Adhu Correct!
+                if cur_sl > entry_prem: result="WIN"
+                elif cur_sl == entry_prem: result="BREAKEVEN"
+                else: result="LOSS"
+                exit_prem=cur_sl; exit_reason=f"{'Trailing' if hit_trail else 'Initial'} SL Hit @ Candle {j-i} - {trail_used}"; break
+            if est_prem >= opt["prem_tgt2"]:
+                result="WIN"; exit_prem=opt["prem_tgt2"]; exit_reason=f"TGT2 Hit @ Candle {j-i}"; break
+        # FIX 4: OPEN na - Last Premium la Exit - Entry la Illa!
         if result=="OPEN":
-            exit_prem=max(exit_prem, cur_sl) if max_prem>entry_prem else exit_prem
-            result="WIN" if exit_prem>entry_prem else "LOSS" if exit_prem<entry_prem else "BREAKEVEN"; exit_reason=f"Time Exit - {trail_used}"
+            exit_prem=last_est  # Ithu Thaan Mukkiyam! Munna Entry-ve Irundhuchu!
+            # Trailing SL-ku Keela Pochu na - SL la Exit
+            if exit_prem < cur_sl:
+                exit_prem=cur_sl
+            if exit_prem > entry_prem*1.02: result="WIN"
+            elif exit_prem < entry_prem*0.98: result="LOSS"
+            else: result="BREAKEVEN"
+            exit_reason=f"Time Exit (10 Candles) - Last Prem {round(last_est,2)} - {trail_used}"
         pnl=round((exit_prem-entry_prem)*opt["lot"],2); pnl_pct=round((exit_prem-entry_prem)/entry_prem*100,1)
         trades.append({"date":candles[i]["time"],"action":action,"trend":trend,"breakout":breakout or "-","spot":round(entry_spot,2),"strike":opt["strike"],"opt_type":opt["opt_type"],"entry_prem":entry_prem,"exit_prem":round(exit_prem,2),"tgt":tgt_prem,"sl":sl_prem,"trail_sl":round(cur_sl,2),"trail_used":trail_used,"max_prem":round(max_prem,2),"result":result,"pnl":pnl,"pnl_pct":pnl_pct,"exit_reason":exit_reason,"lot":opt["lot"]})
         last_trade_end=i+6
@@ -170,7 +194,6 @@ def get_live_prices():
             elif trend_level in [1,2] or btype=="DOWN": action="BUY PE"; signal="BUY PE"; color="green"; strength=88 if trend_level==1 else 80
             else: action="WAIT"; signal="WAIT"; color="orange"; strength=45
             conf=min(92,max(50,strength+abs(pct)*5+(10 if breakout else 0))); cfg=CONFIG[name]
-            # BID/ASK REMOVED - Live = Price Direct
             live=price
             if action in ["BUY CE","BUY PE"]: entry=live; sl=round(entry*(1-cfg["sl_pct"]/100),2); tgt=round(entry*(1+cfg["tgt_pct"]/100),2); tgt2=round(entry*(1+cfg["tgt_pct"]/100*2),2); option=f"{name} {action}"
             else: entry=live; sl=round(entry*0.998,2); tgt=round(entry*1.002,2); tgt2=round(entry*1.004,2); option=f"{name} - WAIT"
@@ -316,7 +339,7 @@ def home():
     </div>
     <div id='breakoutBox' class='breakout-box'><div style='font-size:11px'>🚨 BREAKOUT - AUTO ALERT SENT!</div><h2 id='breakoutTitle' style='margin:6px 0;font-size:18px'>🔥 BREAKOUT!</h2><div id='breakoutDesc' style='font-size:12px;line-height:1.5'>--</div></div>
     <div id='scriptsGrid' class='grid5'></div>
-    <div class='bt-box'><div style='display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center'><b style='font-size:15px'>📊 BACKTEST - Last 30 Days</b><button onclick='loadBacktestAll()' style='background:#009688;color:white;border:none;padding:8px 14px;border-radius:7px;font-weight:bold;cursor:pointer'>▶️ Run Backtest</button></div><div id='btLoading' style='display:none;text-align:center;padding:12px'>⏳ Running... 30 Sec Wait...</div><div id='btGrid' class='bt-grid'></div><div id='btDetail' style='margin-top:10px'></div></div>
+    <div class='bt-box'><div style='display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center'><b style='font-size:15px'>📊 BACKTEST - Last 30 Days - FIXED ✅</b><button onclick='loadBacktestAll()' style='background:#009688;color:white;border:none;padding:8px 14px;border-radius:7px;font-weight:bold;cursor:pointer'>▶️ Run Backtest</button></div><div class='small'>Fix: Time Exit la Last Premium la Exit Aagum - BE Bug Fix Aayiduchu!</div><div id='btLoading' style='display:none;text-align:center;padding:12px'>⏳ Running... 30 Sec Wait...</div><div id='btGrid' class='bt-grid'></div><div id='btDetail' style='margin-top:10px'></div></div>
     <div style='margin-top:8px;text-align:center'><a class='btn b1' href='/test_telegram'>📩 Test Telegram</a><a class='btn b7' href='javascript:loadBacktestAll()'>📊 Backtest</a><a class='btn b6' href='/test_auto'>🧪 Test Alert</a><a class='btn b3' href='/debug'>🔍 Debug</a></div>
     <div class='small' style='text-align:center;margin-top:6px' id='lastUpdate'>--</div>
     <script>
