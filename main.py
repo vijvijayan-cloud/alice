@@ -9,7 +9,6 @@ ALICE_API_KEY = os.environ.get("ALICE_API_KEY", "")
 IST = timezone(timedelta(hours=5, minutes=30))
 def ist_now(): return datetime.now(IST)
 def ist_str(): return ist_now().strftime('%d-%m-%Y %I:%M:%S %p IST')
-
 def send_telegram(msg):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID: return False
     try:
@@ -17,7 +16,6 @@ def send_telegram(msg):
         r = requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": msg}, timeout=10)
         return r.status_code == 200
     except: return False
-
 def get_ip():
     try: return requests.get("https://api.ipify.org", timeout=5).text
     except: return "Unknown"
@@ -35,13 +33,11 @@ CONFIG = {
     "SILVERM": {"spread": 80, "sl_pct": 0.30, "tgt_pct": 0.60, "emoji": "⚪", "label": "MCX", "strike_step": 500, "lot": 5, "iv": 22.0},
 }
 SCRIPTS = {"NIFTY":"^NSEI","SENSEX":"^BSESN","CRUDEOILM":"CL=F","GOLDM":"GC=F","SILVERM":"SI=F"}
-
 def convert_price(name, raw, usdinr):
     if name=="CRUDEOILM": return raw*usdinr
     if name=="GOLDM": return (raw/31.1035)*10*usdinr
     if name=="SILVERM": return (raw/31.1035)*1000*usdinr
     return raw
-
 def calc_option(name, spot, action):
     cfg = CONFIG[name]; step = cfg["strike_step"]; iv = cfg["iv"]/100
     dte = 4 if name in ["NIFTY","SENSEX"] else 12; t = dte/365.0
@@ -57,35 +53,22 @@ def calc_option(name, spot, action):
     prem_sl = round(premium * 0.70, 2); prem_tgt1 = round(premium * 1.60, 2); prem_tgt2 = round(premium * 2.20, 2)
     lot = cfg["lot"]; total_cost = round(premium * lot, 2)
     max_loss = round((premium - prem_sl) * lot, 2); max_profit = round((prem_tgt1 - premium) * lot, 2)
-    # === TRAILING SL LEVELS ===
-    # Trail 1: +20% -> SL = Entry (Breakeven)
-    # Trail 2: +40% -> SL = +20% Profit Lock
-    # Trail 3: +60% TGT1 -> SL = +40% Profit Lock
-    # Trail 4: +100% -> SL = +60% Profit Lock
     trail_levels = [
-        {"trigger": round(premium*1.20,2), "new_sl": round(premium*1.00,2), "label": "Trail 1: +20% -> SL = Entry (No Loss!)"},
-        {"trigger": round(premium*1.40,2), "new_sl": round(premium*1.20,2), "label": "Trail 2: +40% -> SL = +20% Profit Lock!"},
-        {"trigger": round(premium*1.60,2), "new_sl": round(premium*1.40,2), "label": "Trail 3: TGT1 +60% -> SL = +40% Profit Lock!"},
-        {"trigger": round(premium*2.00,2), "new_sl": round(premium*1.60,2), "label": "Trail 4: +100% -> SL = +60% Profit Lock!"},
+        {"trigger": round(premium*1.20,2), "new_sl": round(premium*1.00,2), "label": "Trail 1: +20% -> SL = Entry"},
+        {"trigger": round(premium*1.40,2), "new_sl": round(premium*1.20,2), "label": "Trail 2: +40% -> SL = +20% Lock"},
+        {"trigger": round(premium*1.60,2), "new_sl": round(premium*1.40,2), "label": "Trail 3: +60% -> SL = +40% Lock"},
+        {"trigger": round(premium*2.00,2), "new_sl": round(premium*1.60,2), "label": "Trail 4: +100% -> SL = +60% Lock"},
     ]
     return {"strike": strike, "atm": atm, "opt_type": opt_type, "premium": premium, "intrinsic": round(intrinsic,2), "time_value": round(time_value,2), "prem_sl": prem_sl, "prem_tgt1": prem_tgt1, "prem_tgt2": prem_tgt2, "lot": lot, "total_cost": total_cost, "max_loss": max_loss, "max_profit": max_profit, "dte": dte, "iv": cfg["iv"], "moneyness": "ITM1" if action in ["BUY CE","BUY PE"] else "ATM", "trail_levels": trail_levels}
-
 def calc_trailing(entry_prem, current_prem, initial_sl):
-    # Ippo Premium Evlo Irukku nu Vachu - Trailing SL Enna nu Calculate
-    if current_prem >= entry_prem*2.00:
-        return {"trail_sl": round(entry_prem*1.60,2), "stage": "Trail 4 🔥", "locked_profit": round((entry_prem*1.60-entry_prem),2), "locked_pct": 60, "status": "TGT2 Cross - Profit Lock 60%!"}
-    elif current_prem >= entry_prem*1.60:
-        return {"trail_sl": round(entry_prem*1.40,2), "stage": "Trail 3 ✅", "locked_profit": round((entry_prem*1.40-entry_prem),2), "locked_pct": 40, "status": "TGT1 Hit - Profit Lock 40%!"}
-    elif current_prem >= entry_prem*1.40:
-        return {"trail_sl": round(entry_prem*1.20,2), "stage": "Trail 2 ✅", "locked_profit": round((entry_prem*1.20-entry_prem),2), "locked_pct": 20, "status": "Profit Lock 20%!"}
-    elif current_prem >= entry_prem*1.20:
-        return {"trail_sl": round(entry_prem*1.00,2), "stage": "Trail 1 ✅", "locked_profit": 0, "locked_pct": 0, "status": "Breakeven - Loss Illa!"}
-    else:
-        return {"trail_sl": initial_sl, "stage": "No Trail Yet", "locked_profit": round((initial_sl-entry_prem),2), "locked_pct": -30, "status": "Initial SL - Wait Pannunga"}
+    if current_prem >= entry_prem*2.00: return {"trail_sl": round(entry_prem*1.60,2), "stage": "Trail 4 🔥", "locked_profit": round((entry_prem*1.60-entry_prem),2), "locked_pct": 60, "status": "TGT2 Cross!"}
+    elif current_prem >= entry_prem*1.60: return {"trail_sl": round(entry_prem*1.40,2), "stage": "Trail 3 ✅", "locked_profit": round((entry_prem*1.40-entry_prem),2), "locked_pct": 40, "status": "TGT1 Hit!"}
+    elif current_prem >= entry_prem*1.40: return {"trail_sl": round(entry_prem*1.20,2), "stage": "Trail 2 ✅", "locked_profit": round((entry_prem*1.20-entry_prem),2), "locked_pct": 20, "status": "Profit Lock 20%!"}
+    elif current_prem >= entry_prem*1.20: return {"trail_sl": round(entry_prem*1.00,2), "stage": "Trail 1 ✅", "locked_profit": 0, "locked_pct": 0, "status": "Breakeven!"}
+    else: return {"trail_sl": initial_sl, "stage": "No Trail Yet", "locked_profit": round((initial_sl-entry_prem),2), "locked_pct": -30, "status": "Initial SL"}
 
-# === BACKTEST WITH TRAILING ===
 def run_backtest(name, days=30, use_trailing=True):
-    usdinr = get_usdinr(); sym = SCRIPTS[name]; cfg = CONFIG[name]
+    usdinr = get_usdinr(); sym = SCRIPTS[name]
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range=1mo&interval=15m"
         r = requests.get(url, headers={"User-Agent":"Mozilla/5.0"}, timeout=12).json()
@@ -123,36 +106,21 @@ def run_backtest(name, days=30, use_trailing=True):
         elif level==4 and breakout and btype=="UP": action="BUY CE"
         elif level==2 and breakout and btype=="DOWN": action="BUY PE"
         else: continue
-        entry_spot=price; opt=calc_option(name, entry_spot, action)
-        entry_prem=opt["premium"]; sl_prem=opt["prem_sl"]; tgt_prem=opt["prem_tgt1"]
-        # === TRAILING SIMULATION ===
-        result="OPEN"; exit_prem=entry_prem; exit_reason="Time Exit"; trail_used="No Trail"; max_prem=entry_prem
-        cur_sl = sl_prem
+        entry_spot=price; opt=calc_option(name, entry_spot, action); entry_prem=opt["premium"]; sl_prem=opt["prem_sl"]; tgt_prem=opt["prem_tgt1"]
+        result="OPEN"; exit_prem=entry_prem; exit_reason="Time Exit"; trail_used="No Trail"; max_prem=entry_prem; cur_sl=sl_prem
         for j in range(i+1, min(i+10, len(candles))):
             fut_price=candles[j]["close"]; spot_move=(fut_price-entry_spot)/entry_spot*100
             if action=="BUY CE": prem_move=spot_move*8
             else: prem_move=-spot_move*8
-            est_prem=max(entry_prem*(1+prem_move/100),1)
-            max_prem=max(max_prem, est_prem)
-            # Trailing Update
+            est_prem=max(entry_prem*(1+prem_move/100),1); max_prem=max(max_prem, est_prem)
             if use_trailing:
-                tr=calc_trailing(entry_prem, est_prem, sl_prem)
-                # SL Mattum Mela Pogum - Keela Varadhu!
-                cur_sl=max(cur_sl, tr["trail_sl"])
-                trail_used=tr["stage"]
-            # Exit Check - Trailing SL la Hit Aacha?
+                tr=calc_trailing(entry_prem, est_prem, sl_prem); cur_sl=max(cur_sl, tr["trail_sl"]); trail_used=tr["stage"]
             if est_prem <= cur_sl:
-                result="WIN" if cur_sl>entry_prem else "LOSS" if cur_sl<entry_prem else "BREAKEVEN"
-                exit_prem=cur_sl; exit_reason=f"Trailing SL Hit @ Candle {j-i} - {trail_used}"; break
-            if est_prem >= opt["prem_tgt2"]:
-                result="WIN"; exit_prem=opt["prem_tgt2"]; exit_reason=f"TGT2 Hit @ Candle {j-i} - Trail Lock!"; break
+                result="WIN" if cur_sl>entry_prem else "LOSS" if cur_sl<entry_prem else "BREAKEVEN"; exit_prem=cur_sl; exit_reason=f"Trailing SL Hit @ {j-i}"; break
+            if est_prem >= opt["prem_tgt2"]: result="WIN"; exit_prem=opt["prem_tgt2"]; exit_reason=f"TGT2 Hit @ {j-i}"; break
         if result=="OPEN":
-            pnl_prem=exit_prem-entry_prem
-            # Last Candle Premium = exit
-            # Trailing la Already SL Move Aayiduchu - Adha Vachu Exit
             exit_prem=max(exit_prem, cur_sl) if max_prem>entry_prem else exit_prem
-            result="WIN" if exit_prem>entry_prem else "LOSS" if exit_prem<entry_prem else "BREAKEVEN"
-            exit_reason=f"Time Exit (10 Candles) - {trail_used}"
+            result="WIN" if exit_prem>entry_prem else "LOSS" if exit_prem<entry_prem else "BREAKEVEN"; exit_reason=f"Time Exit - {trail_used}"
         pnl=round((exit_prem-entry_prem)*opt["lot"],2); pnl_pct=round((exit_prem-entry_prem)/entry_prem*100,1)
         trades.append({"date":candles[i]["time"],"action":action,"trend":trend,"breakout":breakout or "-","spot":round(entry_spot,2),"strike":opt["strike"],"opt_type":opt["opt_type"],"entry_prem":entry_prem,"exit_prem":round(exit_prem,2),"tgt":tgt_prem,"sl":sl_prem,"trail_sl":round(cur_sl,2),"trail_used":trail_used,"max_prem":round(max_prem,2),"result":result,"pnl":pnl,"pnl_pct":pnl_pct,"exit_reason":exit_reason,"lot":opt["lot"]})
         last_trade_end=i+6
@@ -160,9 +128,7 @@ def run_backtest(name, days=30, use_trailing=True):
     wins=[t for t in trades if t["result"]=="WIN"]; losses=[t for t in trades if t["result"]=="LOSS"]; be=[t for t in trades if t["result"]=="BREAKEVEN"]
     total_pnl=round(sum(t["pnl"] for t in trades),2); win_rate=round(len(wins)/len(trades)*100,1) if trades else 0
     avg_win=round(sum(t["pnl"] for t in wins)/len(wins),2) if wins else 0; avg_loss=round(sum(t["pnl"] for t in losses)/len(losses),2) if losses else 0
-    # Trailing Benefit - Breakeven Trades = Loss la irundhu Save Aachu!
-    saved = len(be)
-    return {"script":name,"days":days,"total":len(trades),"win":len(wins),"loss":len(losses),"breakeven":len(be),"win_rate":win_rate,"total_pnl":total_pnl,"avg_win":avg_win,"avg_loss":avg_loss,"best":max(trades,key=lambda x:x["pnl"])["pnl"] if trades else 0,"worst":min(trades,key=lambda x:x["pnl"])["pnl"] if trades else 0,"ce_total":len([t for t in trades if t["action"]=="BUY CE"]),"ce_win_rate":round(len([t for t in trades if t["action"]=="BUY CE" and t["result"]=="WIN"])/len([t for t in trades if t["action"]=="BUY CE"])*100,1) if len([t for t in trades if t["action"]=="BUY CE"])>0 else 0,"pe_total":len([t for t in trades if t["action"]=="BUY PE"]),"pe_win_rate":round(len([t for t in trades if t["action"]=="BUY PE" and t["result"]=="WIN"])/len([t for t in trades if t["action"]=="BUY PE"])*100,1) if len([t for t in trades if t["action"]=="BUY PE"])>0 else 0,"trailing_saved":saved,"use_trailing":use_trailing,"trades":trades[-20:],"all_trades_count":len(trades)}
+    return {"script":name,"days":days,"total":len(trades),"win":len(wins),"loss":len(losses),"breakeven":len(be),"win_rate":win_rate,"total_pnl":total_pnl,"avg_win":avg_win,"avg_loss":avg_loss,"best":max(trades,key=lambda x:x["pnl"])["pnl"] if trades else 0,"worst":min(trades,key=lambda x:x["pnl"])["pnl"] if trades else 0,"ce_total":len([t for t in trades if t["action"]=="BUY CE"]),"ce_win_rate":round(len([t for t in trades if t["action"]=="BUY CE" and t["result"]=="WIN"])/len([t for t in trades if t["action"]=="BUY CE"])*100,1) if len([t for t in trades if t["action"]=="BUY CE"])>0 else 0,"pe_total":len([t for t in trades if t["action"]=="BUY PE"]),"pe_win_rate":round(len([t for t in trades if t["action"]=="BUY PE" and t["result"]=="WIN"])/len([t for t in trades if t["action"]=="BUY PE"])*100,1) if len([t for t in trades if t["action"]=="BUY PE"])>0 else 0,"trailing_saved":len(be),"use_trailing":use_trailing,"trades":trades[-20:],"all_trades_count":len(trades)}
 
 last_alert={"time":None,"script":"","action":""}; alert_history=[]
 def get_live_prices():
@@ -215,7 +181,6 @@ def get_live_prices():
         except:
             out[name]={"name":name,"symbol":sym,"price":0,"live":0,"bid":0,"ask":0,"prev":0,"change":0,"pct":0,"signal":"WAIT","action":"WAIT","color":"orange","trend":"Loading...","trend_color":"#ff9800","trend_bg":"#222","trend_level":3,"market_cond":"Loading...","cond_color":"#aaa","ema9":0,"ema21":0,"ema50":0,"confidence":0,"usdinr":88.5,"entry":0,"sl":0,"tgt":0,"tgt2":0,"option":"WAIT","spread":0,"breakout":None,"breakout_type":"","resistance":0,"support":0,"profit_ratio":0,"profit_pct":0,"score":0,"emoji":CONFIG[name]["emoji"],"label":CONFIG[name]["label"],"ist_time":ist_str(),"strike":0,"atm":0,"opt_type":"CE","premium":0,"intrinsic":0,"time_value":0,"prem_sl":0,"prem_tgt1":0,"prem_tgt2":0,"lot":0,"total_cost":0,"max_loss":0,"max_profit":0,"dte":0,"iv":0,"moneyness":"--","trail_levels":[]}
     return dict(sorted(out.items(), key=lambda x: x[1]["score"], reverse=True))
-
 def get_ai_suggestion():
     prices=get_live_prices(); candidates={k:v for k,v in prices.items() if v["action"] in ["BUY CE","BUY PE"] and v["price"]!=0}
     if not candidates:
@@ -226,10 +191,9 @@ def get_ai_suggestion():
     if d["breakout"]: reason+=f"🔥 {d['breakout']} "
     reason+=f"OPTIONS BUYING - {d['action']} Mattum!"
     return {"script":best_name,"action":d["action"],"confidence":d["confidence"],"reason":reason,"entry":d["entry"],"target":d["tgt"],"stoploss":d["sl"],"option":d["option"],"trend":d["trend"],"pct":d["pct"],"all":prices,"breakout":d["breakout"],"tgt2":d["tgt2"],"bid":d["bid"],"ask":d["ask"],"resistance":d["resistance"],"support":d["support"],"profit_ratio":d["profit_ratio"],"profit_pct":d["profit_pct"],"market_cond":d["market_cond"],"ist_time":ist_str(),"strike":d["strike"],"atm":d["atm"],"opt_type":d["opt_type"],"premium":d["premium"],"intrinsic":d["intrinsic"],"time_value":d["time_value"],"prem_sl":d["prem_sl"],"prem_tgt1":d["prem_tgt1"],"prem_tgt2":d["prem_tgt2"],"lot":d["lot"],"total_cost":d["total_cost"],"max_loss":d["max_loss"],"max_profit":d["max_profit"],"moneyness":d["moneyness"],"trail_levels":d["trail_levels"]}
-
 def auto_alert_loop():
     time.sleep(60)
-    send_telegram(f"🤖 AI BOT STARTED!\n\n✅ Auto Alert + Trailing ON\n🕐 Time: {ist_str()}\n🎯 Mode: Options Buying Only - ITM1 + Trailing SL\n🚨 Breakout Vandha Auto Telegram Varum!")
+    send_telegram(f"🤖 AI BOT STARTED!\n\n✅ Auto Alert + Trailing ON\n🕐 Time: {ist_str()}\n🎯 Mode: Options Buying Only - ITM1 + Trailing SL")
     while True:
         try:
             now_ist=ist_now(); hour=now_ist.hour+now_ist.minute/60; is_market_hours=9.0<=hour<=23.5; is_sunday=now_ist.weekday()==6
@@ -243,13 +207,12 @@ def auto_alert_loop():
                     is_dup=(last_alert["script"]==ai["script"] and last_alert["action"]==ai["action"] and time_diff<30)
                     if not is_dup:
                         trail_txt="\n".join([f"  {t['label']} | Trigger Rs {t['trigger']} -> SL Rs {t['new_sl']}" for t in ai.get("trail_levels",[])])
-                        msg=f"{alert_type}\n\n⏰ TIME: {ist_str()}\n🏆 Profit: {ai.get('profit_ratio','--')}:1\n🎯 {ai['script']} ({ai['option']})\n📊 {ai['action']} | {ai['trend']}\n\n🎯 OPTION - ITM1:\n📌 Strike: {ai.get('strike')} {ai.get('opt_type')}\n💰 PREMIUM: Rs {ai.get('premium')} | Lot {ai.get('lot')} | Cost Rs {ai.get('total_cost')}\n🎯 Prem TGT: Rs {ai.get('prem_tgt1')} | SL: Rs {ai.get('prem_sl')}\n\n📈 TRAILING SL - PROFIT LOCK:\n{trail_txt}\n\n⚠️ Trailing: Premium Mela Pona SL-a Mela Kondu Ponga! Keela Kondu Vara Koodadhu!"
+                        msg=f"{alert_type}\n\n⏰ TIME: {ist_str()}\n🏆 Profit: {ai.get('profit_ratio','--')}:1\n🎯 {ai['script']} ({ai['option']})\n📊 {ai['action']} | {ai['trend']}\n\n🎯 OPTION - ITM1:\n📌 Strike: {ai.get('strike')} {ai.get('opt_type')}\n💰 PREMIUM: Rs {ai.get('premium')} | Lot {ai.get('lot')} | Cost Rs {ai.get('total_cost')}\n🎯 Prem TGT: Rs {ai.get('prem_tgt1')} | SL: Rs {ai.get('prem_sl')}\n\n📈 TRAILING:\n{trail_txt}"
                         ok=send_telegram(msg)
                         if ok: last_alert={"time":now_ist,"script":ai["script"],"action":ai["action"]}; alert_history.append({"time":ist_str(),"script":ai["script"],"action":ai["action"],"type":alert_type,"price":ai["entry"],"strike":ai.get('strike'),'premium':ai.get('premium')})
             time.sleep(300)
         except Exception as e: print(f"Auto Error {e}"); time.sleep(60)
 threading.Thread(target=auto_alert_loop, daemon=True).start()
-
 @app.route('/api/prices')
 def api_prices(): return jsonify(get_live_prices())
 @app.route('/api/ai')
@@ -268,7 +231,6 @@ def api_backtest_all():
 def api_trail(name, entry, current):
     try:
         entry=float(entry); current=float(current)
-        # Initial SL = Entry*0.7
         tr=calc_trailing(entry, current, round(entry*0.7,2))
         return jsonify({"entry":entry,"current":current,"trail_sl":tr["trail_sl"],"stage":tr["stage"],"locked_profit":tr["locked_profit"],"locked_pct":tr["locked_pct"],"status":tr["status"],"pnl_pct":round((current-entry)/entry*100,1)})
     except Exception as e: return jsonify({"error":str(e)})
@@ -276,9 +238,8 @@ def api_trail(name, entry, current):
 def backtest_page(name):
     bt=run_backtest(name.upper(), days=30, use_trailing=True)
     if "error" in bt: return f"Failed: {bt['error']}"
-    msg=f"📊 BACKTEST + TRAILING - {name.upper()}\n\nTotal: {bt['total']} | Win: {bt['win']} | Loss: {bt['loss']} | BE: {bt['breakeven']}\n🎯 Win Rate: {bt['win_rate']}%\n💰 Total P&L: Rs {bt['total_pnl']}\n🛡️ Trailing Saved: {bt['trailing_saved']} Trades Breakeven (Loss la irundhu Save!)\n⏰ {ist_str()}"
-    ok=send_telegram(msg)
-    return f"✅ Sent! Win {bt['win_rate']}% P&L Rs {bt['total_pnl']} Trailing Saved {bt['trailing_saved']}" if ok else "❌ Failed!"
+    msg=f"📊 BACKTEST + TRAILING - {name.upper()}\n\nTotal: {bt['total']} | Win: {bt['win']} | Loss: {bt['loss']} | BE: {bt['breakeven']}\n🎯 Win Rate: {bt['win_rate']}%\n💰 Total P&L: Rs {bt['total_pnl']}\n🛡️ Trailing Saved: {bt['trailing_saved']} Trades Breakeven!\n⏰ {ist_str()}"
+    ok=send_telegram(msg); return f"✅ Sent! Win {bt['win_rate']}% P&L Rs {bt['total_pnl']}" if ok else "❌ Failed!"
 @app.route('/api/breakout')
 def api_breakout():
     prices=get_live_prices(); bo=[{"script":k,"breakout":v["breakout"],"action":v["action"],"price":v["live"],"resistance":v["resistance"],"support":v["support"],"confidence":v["confidence"]} for k,v in prices.items() if v["breakout"]]
@@ -287,28 +248,26 @@ def api_breakout():
 def api_alerts(): return jsonify({"last_alert": {"script": last_alert["script"], "action": last_alert["action"], "time": last_alert["time"].strftime('%d-%m-%Y %I:%M:%S %p IST') if last_alert["time"] else "None"}, "history": alert_history[-10:], "auto_alert": "ON", "ist_time": ist_str()})
 @app.route('/breakout_alert')
 def breakout_alert():
-    ai=get_ai_suggestion()
-    trail_txt="\n".join([f"{t['label']}" for t in ai.get("trail_levels",[])])
+    ai=get_ai_suggestion(); trail_txt="\n".join([f"{t['label']}" for t in ai.get("trail_levels",[])])
     msg=f"🚨 MANUAL - {ist_str()}\n\n🎯 {ai['script']} {ai.get('strike')} {ai.get('opt_type')}\n💰 Premium Rs {ai.get('premium')} | TGT Rs {ai.get('prem_tgt1')} | SL Rs {ai.get('prem_sl')}\n\n📈 TRAILING:\n{trail_txt}"
     ok=send_telegram(msg); return "✅ Sent!" if ok else "❌ Failed!"
 @app.route('/ai_signal')
 def ai_signal(): return breakout_alert()
 @app.route('/test_auto')
 def test_auto():
-    ai=get_ai_suggestion(); msg=f"🧪 TEST TRAILING\n\n⏰ {ist_str()}\n🎯 {ai['script']} {ai['strike']} {ai['opt_type']}\n💰 Premium Rs {ai['premium']}\n📈 Trail Levels:\n"+"\n".join([f"{t['label']}" for t in ai.get("trail_levels",[])])
+    ai=get_ai_suggestion(); msg=f"🧪 TEST TRAILING\n\n⏰ {ist_str()}\n🎯 {ai['script']} {ai['strike']} {ai['opt_type']}\n💰 Premium Rs {ai['premium']}\n📈 Trail:\n"+"\n".join([f"{t['label']}" for t in ai.get("trail_levels",[])])
     ok=send_telegram(msg); return "✅ Sent!" if ok else "❌ Failed!"
-
 @app.route('/')
 def home():
     now=ist_str()
     html="""
-    <html><head><title>AI Bot - Trailing SL</title><meta name='viewport' content='width=device-width, initial-scale=1'>
+    <html><head><title>AI Bot - Clean</title><meta name='viewport' content='width=device-width, initial-scale=1'>
     <style>
     *{box-sizing:border-box} body{background:#0e1117;color:white;font-family:Arial;margin:0;padding:8px;overflow-x:hidden}
     .card{background:#131722;border-radius:10px;padding:10px;border:1px solid #222;margin-top:8px}
     .btn{display:inline-block;padding:9px 12px;border-radius:7px;color:white;text-decoration:none;font-weight:bold;margin:3px;font-size:12px}
     .b1{background:#0088cc}.b2{background:#00c853}.b3{background:#ff9800}.b4{background:#7c3aed}.b5{background:#ff1744}.b6{background:#ff6d00}.b7{background:#009688}
-    .green{color:#00ff88}.orange{color:#ff9800}.red{color:#ff4444}
+    .green{color:#00ff88}
     .top{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px}
     .grid5{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:8px}
     .script-card{background:#1a2030;border-radius:10px;padding:10px;border:1px solid #2a3348;position:relative}
@@ -325,12 +284,11 @@ def home():
     .levels{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-top:6px}
     .lvl{background:#0e1117;border-radius:7px;padding:6px;text-align:center;border:1px solid #333;font-size:12px}
     .opt-box{background:linear-gradient(135deg,#1a0033,#0d1b4c);border:1px solid #7c3aed;border-radius:8px;padding:8px;margin-top:6px}
-    .trail-box{background:#0f2a1d;border:1px solid #00ff88;border-radius:8px;padding:8px;margin-top:6px;font-size:11px}
+    .trail-box{background:#0f2a1d;border:1px solid #00ff88;border-radius:8px;padding:7px;margin-top:6px;font-size:11px}
     .ai-box{background:linear-gradient(135deg,#1a0033,#0d1b4c);border:2px solid #7c3aed;border-radius:12px;padding:12px;margin-top:8px}
     .ai-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}
     .ai-stat{background:#0e1117;border-radius:8px;padding:8px;text-align:center;border:1px solid #333;font-size:13px}
     .breakout-box{background:linear-gradient(135deg,#ff6d00,#ff1744);border-radius:12px;padding:12px;margin-top:8px;display:none}
-    .auto-box{background:#0f2a1d;border:1px solid #00ff88;border-radius:10px;padding:10px;margin-top:8px}
     .bt-box{background:#131722;border:2px solid #009688;border-radius:12px;padding:12px;margin-top:8px}
     .bt-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:8px}
     .bt-card{background:#1a2030;border-radius:10px;padding:10px;border:1px solid #2a3348;text-align:center}
@@ -339,114 +297,87 @@ def home():
     @media(max-width:1100px){.grid5,.bt-grid{grid-template-columns:repeat(3,1fr)}}
     @media(max-width:700px){.grid5,.bt-grid{grid-template-columns:1fr}.ai-grid{grid-template-columns:1fr 1fr}}
     </style></head><body>
-    <div class='top'><h2 style='margin:4px 0;font-size:20px'>🤖 AI BOT DASHBOARD</h2><span style='background:#1e293b;padding:6px 10px;border-radius:20px;font-size:12px'><span class='live-dot'>🟢</span> <span id='clock'>"""+now+"""</span> | USDINR: <span id='usdinrTop'>--</span> | IP: """+get_ip()+"""</span></div>
-    <div style='background:#0f2a1d;border:1px solid #00ff88;border-radius:8px;padding:7px;margin-top:8px;text-align:center;font-size:12px'>✅ <b>OPTIONS BUYING ONLY</b> • <b>ITM1 + TRAILING SL ✅ PROFIT LOCK!</b> • BACKTEST + IST + AUTO ALERT ON ✅</div>
-    <div class='auto-box'><div style='display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px'><div><b>🤖 AUTO ALERT + TRAILING: <span class='green'>✅ ON</span></b> <span class='small'>Breakout Vandha Telegram + Trailing Levels Varum!</span></div><div style='font-size:11px'>Last Auto: <b id='lastAlert'>Checking...</b></div></div><div id='alertHistory' style='font-size:11px;margin-top:6px'></div></div>
+    <div class='top'><h2 style='margin:4px 0;font-size:20px'>🤖 AI BOT DASHBOARD</h2><span style='background:#1e293b;padding:6px 10px;border-radius:20px;font-size:12px'><span class='live-dot'>🟢</span> <span id='clock'>"""+now+"""</span> | USDINR: <span id='usdinrTop'>--</span></span></div>
 
-    <!-- 📈 TRAILING CALCULATOR -->
-    <div class='card' style='border:2px solid #00ff88'>
-      <b>📈 TRAILING SL CALCULATOR - Trade Edutha Appuram Inga Check Pannunga!</b>
-      <div style='display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center'>
-        <label class='small'>Entry Premium: <input id='trailEntry' type='number' value='100' style='background:#1e293b;color:white;border:1px solid #333;padding:8px;border-radius:7px;width:100px'></label>
-        <label class='small'>Ippo Premium: <input id='trailCurrent' type='number' value='120' style='background:#1e293b;color:white;border:1px solid #333;padding:8px;border-radius:7px;width:100px'></label>
-        <button onclick='calcTrail()' style='background:#00c853;color:black;border:none;padding:8px 14px;border-radius:7px;font-weight:bold;cursor:pointer'>Calculate Trailing SL</button>
-      </div>
-      <div id='trailResult' style='margin-top:8px;font-size:13px'>Entry Rs 100, Current Rs 120 na - Trail SL Rs 100 (Breakeven) - Loss Illa!</div>
-    </div>
-
-    <div class='bt-box'><div style='display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center'><b style='font-size:15px'>📊 BACKTEST + TRAILING - Last 30 Days</b><button onclick='loadBacktestAll()' style='background:#009688;color:white;border:none;padding:8px 14px;border-radius:7px;font-weight:bold;cursor:pointer'>▶️ Run Backtest With Trailing</button></div><div class='small'>Trailing ON la - Loss Trades Breakeven-a Maarum! Win Rate + Profit Jaasthi Varum!</div><div id='btLoading' style='display:none;text-align:center;padding:12px'>⏳ Backtest Running... 30 Sec Wait...</div><div id='btGrid' class='bt-grid'></div><div id='btDetail' style='margin-top:10px'></div></div>
-
-    <div class='card' style='padding:8px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px'><div><span class='small'>🌍 MARKET:</span> <b id='overallCond' style='font-size:14px'>Loading...</b></div><div><span class='small'>📊 TREND:</span> <b id='overallTrend'>--</b></div><div><span class='small'>💰 BEST PREMIUM:</span> <b id='overallPrem'>--</b></div></div>
-    <div id='breakoutBox' class='breakout-box'><div style='font-size:11px'>🚨 BREAKOUT - AUTO ALERT SENT!</div><h2 id='breakoutTitle' style='margin:6px 0;font-size:18px'>🔥 BREAKOUT!</h2><div id='breakoutDesc' style='font-size:12px;line-height:1.5'>--</div></div>
-
+    <!-- AI BOX - MIDDLE CONTENT REMOVED - TRAILING PLAN BIG BOX ILLA, OVERALL BOX ILLA -->
     <div class='ai-box'>
       <div style='font-size:11px;color:#c4b5fd'>🤖 AI SUGGEST • OPTIONS BUYING ONLY • ITM1 + TRAILING</div>
       <h2 id='aiTitle' style='margin:6px 0;font-size:19px'>🤖 AI Analyzing...</h2>
       <div id='aiReason' style='font-size:12px;color:#e0e7ff;line-height:1.5'>Analyzing...</div>
-      <div style='margin-top:6px'>Conf: <b id='aiConf' style='color:#00ff88;font-size:22px'>--%</b> <span id='aiTrend' style='font-size:11px;color:#aaa'>--</span> <span id='aiProfitBadge' style='background:#00ff88;color:black;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:bold'>--</span> <span id='aiMarketBadge' style='background:#333;padding:3px 8px;border-radius:12px;font-size:11px'>--</span></div>
+      <div style='margin-top:6px'>Conf: <b id='aiConf' style='color:#00ff88;font-size:22px'>--%</b> <span id='aiTrend' style='font-size:11px;color:#aaa'>--</span> <span id='aiProfitBadge' style='background:#00ff88;color:black;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:bold'>--</span></div>
       <div class='ai-grid'>
         <div class='ai-stat'><div class='small'>🏆 #1 BEST</div><b id='aiScript' style='font-size:14px'>--</b><div class='small' id='aiOption'>--</div></div>
-        <div class='ai-stat'><div class='small'>🎯 STRIKE (ITM1)</div><b id='aiStrike' style='font-size:16px;color:#c4b5fd'>--</b><div class='small' id='aiStrikeSub'>--</div></div>
-        <div class='ai-stat'><div class='small'>💰 PREMIUM</div><b id='aiPremium' style='font-size:16px;color:#00ff88'>--</b><div class='small' id='aiPremSub'>--</div></div>
-        <div class='ai-stat'><div class='small'>💸 TOTAL COST</div><b id='aiCost' style='font-size:14px;color:#ff9800'>--</b><div class='small' id='aiCostSub'>--</div></div>
+        <div class='ai-stat'><div class='small'>🎯 STRIKE (ITM1)</div><b id='aiStrike' style='font-size:16px;color:#c4b5fd'>--</b></div>
+        <div class='ai-stat'><div class='small'>💰 PREMIUM</div><b id='aiPremium' style='font-size:16px;color:#00ff88'>--</b></div>
+        <div class='ai-stat'><div class='small'>💸 TOTAL COST</div><b id='aiCost' style='font-size:14px;color:#ff9800'>--</b></div>
       </div>
       <div class='ai-grid'>
         <div class='ai-stat'><div class='small'>💰 SPOT ENTRY</div><b id='aiEntry' style='font-size:14px;color:#00ff88'>--</b></div>
         <div class='ai-stat'><div class='small'>🎯 PREM TGT1</div><b id='aiPremTgt' style='font-size:14px;color:#00ff88'>--</b></div>
         <div class='ai-stat'><div class='small'>🛑 PREM SL</div><b id='aiPremSL' style='font-size:14px;color:#ff4444'>--</b></div>
-        <div class='ai-stat'><div class='small'>📈 MAX PROFIT / LOSS</div><b id='aiMaxPL' style='font-size:13px'>--</b></div>
+        <div class='ai-stat'><div class='small'>📈 MAX P / L</div><b id='aiMaxPL' style='font-size:13px'>--</b></div>
       </div>
-      <div class='trail-box' id='aiTrailBox'><b>📈 TRAILING PLAN - Idha Follow Pannunga!</b><div id='aiTrailLevels' style='margin-top:6px;line-height:1.8'>--</div></div>
-      <div style='margin-top:8px;text-align:center'><a class='btn b2' href='/breakout_alert'>📩 Manual Send</a> <a class='btn b6' href='/test_auto'>🧪 Test Trailing Alert</a></div>
     </div>
 
-    <div class='card' style='border:2px solid #00ff88;text-align:center;padding:8px'><div style='font-size:11px;color:#aaa'>OVERALL - OPTIONS BUYING ONLY - IST</div><h2 id='mainSignal' class='green' style='margin:4px 0;font-size:18px'>Loading...</h2><div id='mainSub' style='font-size:12px'>Checking...</div><div style='margin-top:4px'><span class='small' id='lastUpdate'>--</span></div></div>
-    <div style='display:flex;justify-content:space-between;align-items:center;margin-top:10px'><b style='font-size:14px'>📊 5 SCRIPTS - SAME ROW - HIGH PROFIT FIRST 🏆</b><span class='small'>ITM1 + Trailing Per Script</span></div>
+    <div id='breakoutBox' class='breakout-box'><div style='font-size:11px'>🚨 BREAKOUT - AUTO ALERT SENT!</div><h2 id='breakoutTitle' style='margin:6px 0;font-size:18px'>🔥 BREAKOUT!</h2><div id='breakoutDesc' style='font-size:12px;line-height:1.5'>--</div></div>
+
+    <!-- DIRECT 5 SCRIPTS - MIDDLE OVERALL BOX REMOVED -->
     <div id='scriptsGrid' class='grid5'></div>
-    <div class='card' style='padding:8px'><b style='font-size:13px'>💡 TRAILING RULE - Idha Marakkadhinga!</b><div style='font-size:11px;color:#aaa;margin-top:4px'>1. SL-a Eppovum Mela Mattum Kondu Ponga - Keela Kondu Vara Koodadhu! 2. Premium +20% Vandha - SL-a Entry-ku Kondu Vanga - Loss Illa! 3. TGT Hit Aana - Full Exit Panna Vendaam - 50% Exit, 50% Trailing la Vida! 4. AliceBlue App la - SL Order-a Modify Pannunga - Manual-a Thaan Pannanum - Auto Trail AliceBlue la Illa!</div></div>
-    <div style='margin-top:8px'><a class='btn b1' href='/test_telegram'>📩 Test Telegram</a><a class='btn b7' href='javascript:loadBacktestAll()'>📊 Backtest + Trailing</a><a class='btn b6' href='/test_auto'>🧪 Test Trailing</a><a class='btn b3' href='/debug'>🔍 Debug</a></div>
+
+    <!-- BACKTEST - KEELA - MIDDLE LA ILLA -->
+    <div class='bt-box'><div style='display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center'><b style='font-size:15px'>📊 BACKTEST - Last 30 Days</b><button onclick='loadBacktestAll()' style='background:#009688;color:white;border:none;padding:8px 14px;border-radius:7px;font-weight:bold;cursor:pointer'>▶️ Run Backtest</button></div><div id='btLoading' style='display:none;text-align:center;padding:12px'>⏳ Running... 30 Sec Wait...</div><div id='btGrid' class='bt-grid'></div><div id='btDetail' style='margin-top:10px'></div></div>
+
+    <div style='margin-top:8px;text-align:center'><a class='btn b1' href='/test_telegram'>📩 Test Telegram</a><a class='btn b7' href='javascript:loadBacktestAll()'>📊 Backtest</a><a class='btn b6' href='/test_auto'>🧪 Test Alert</a><a class='btn b3' href='/debug'>🔍 Debug</a></div>
+    <div class='small' style='text-align:center;margin-top:6px' id='lastUpdate'>--</div>
+
     <script>
     function fmt(n){ return 'Rs '+n.toLocaleString('en-IN',{maximumFractionDigits:0}); }
     function fmt2(n){ return 'Rs '+n.toLocaleString('en-IN',{maximumFractionDigits:2}); }
     function updateClock(){ let now=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata'})); document.getElementById('clock').innerText=now.toLocaleDateString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric'})+' '+now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true})+' IST'; }
     setInterval(updateClock,1000); updateClock();
-    function calcTrail(){
-      let entry=parseFloat(document.getElementById('trailEntry').value); let cur=parseFloat(document.getElementById('trailCurrent').value);
-      fetch('/api/trail/NIFTY/'+entry+'/'+cur).then(r=>r.json()).then(d=>{
-        document.getElementById('trailResult').innerHTML=`Entry Rs ${entry} | Current Rs ${cur} (${d.pnl_pct}%) | <b style='color:#00ff88'>Trailing SL: Rs ${d.trail_sl}</b> | Stage: ${d.stage} | Locked Profit: Rs ${d.locked_profit} (${d.locked_pct}%) | ${d.status} | <b>Action: AliceBlue la SL-a Rs ${d.trail_sl}-ku Modify Pannunga!</b>`;
-      });
-    }
     function loadBacktestAll(){
       document.getElementById('btLoading').style.display='block'; document.getElementById('btGrid').innerHTML='';
       fetch('/api/backtest_all').then(r=>r.json()).then(data=>{
         document.getElementById('btLoading').style.display='none'; let html=''; let totalPnl=0; let totalTrades=0; let totalWins=0; let totalBE=0;
         for(let name in data){ let d=data[name]; if(d.error) continue; totalPnl+=d.total_pnl; totalTrades+=d.total; totalWins+=d.win; totalBE+=d.breakeven||0; let col=d.total_pnl>=0?'#00ff88':'#ff4444';
-          html+=`<div class='bt-card'><h3 style='margin:2px 0'>${name}</h3><div style='font-size:22px;font-weight:bold;color:${d.win_rate>=55?'#00ff88':d.win_rate>=45?'#ff9800':'#ff4444'}'>${d.win_rate}% Win</div><div class='small'>${d.total} Trades | ${d.win} Win | ${d.loss} Loss | ${d.breakeven} BE</div><div style='font-size:16px;font-weight:bold;color:${col};margin-top:6px'>${d.total_pnl>=0?'+':''}${fmt(d.total_pnl)}</div><div class='small'>1 Lot | 30 Days | Trailing ON ✅</div><div class='small' style='margin-top:6px'>🛡️ Trailing Saved: ${d.trailing_saved} Trades Breakeven!<br>CE Win: ${d.ce_win_rate}% | PE Win: ${d.pe_win_rate}%</div><div class='small'>Avg Win ${fmt(d.avg_win)} | Avg Loss ${fmt(d.avg_loss)}</div><button onclick="showBacktestDetail('${name}')" style='background:#009688;color:white;border:none;padding:6px 10px;border-radius:6px;margin-top:8px;cursor:pointer;font-size:11px'>📋 Last 20 Trades</button> <a href='/backtest/${name}' style='background:#0088cc;color:white;padding:6px 10px;border-radius:6px;text-decoration:none;font-size:11px;display:inline-block;margin-top:8px'>📩 Telegram</a></div>`;
+          html+=`<div class='bt-card'><h3 style='margin:2px 0'>${name}</h3><div style='font-size:22px;font-weight:bold;color:${d.win_rate>=55?'#00ff88':d.win_rate>=45?'#ff9800':'#ff4444'}'>${d.win_rate}% Win</div><div class='small'>${d.total} Trades | ${d.win} Win | ${d.loss} Loss | ${d.breakeven} BE</div><div style='font-size:16px;font-weight:bold;color:${col};margin-top:6px'>${d.total_pnl>=0?'+':''}${fmt(d.total_pnl)}</div><div class='small'>1 Lot | 30 Days | Trailing ON ✅</div><div class='small' style='margin-top:6px'>🛡️ Saved: ${d.trailing_saved} BE<br>CE ${d.ce_win_rate}% | PE ${d.pe_win_rate}%</div><button onclick="showBacktestDetail('${name}')" style='background:#009688;color:white;border:none;padding:6px 10px;border-radius:6px;margin-top:8px;cursor:pointer;font-size:11px'>📋 Last 20 Trades</button></div>`;
         }
         let overallWin=totalTrades>0?Math.round(totalWins/totalTrades*100):0;
-        html=`<div class='bt-card' style='border:2px solid #00ff88'><h3>🏆 OVERALL + TRAILING</h3><div style='font-size:22px;font-weight:bold;color:${overallWin>=55?'#00ff88':'#ff9800'}'>${overallWin}% Win</div><div class='small'>${totalTrades} Trades | ${totalBE} Breakeven Saved!</div><div style='font-size:16px;font-weight:bold;color:${totalPnl>=0?'#00ff88':'#ff4444'}'>${totalPnl>=0?'+':''}${fmt(totalPnl)}</div><div class='small'>5 Scripts | 30 Days | Trailing ON ✅</div><div class='small' style='margin-top:6px'>🛡️ Trailing la Loss Kammi Aayiduchu!</div></div>`+html;
-        document.getElementById('btGrid').innerHTML=html; document.getElementById('btDetail').innerHTML='<div class="small">👆 Last 20 Trades Click Panna Trailing SL Eppadi Work Aachu nu Theriyum!</div>'; window._btData=data;
+        html=`<div class='bt-card' style='border:2px solid #00ff88'><h3>🏆 OVERALL</h3><div style='font-size:22px;font-weight:bold;color:${overallWin>=55?'#00ff88':'#ff9800'}'>${overallWin}% Win</div><div class='small'>${totalTrades} Trades | ${totalBE} BE Saved!</div><div style='font-size:16px;font-weight:bold;color:${totalPnl>=0?'#00ff88':'#ff4444'}'>${totalPnl>=0?'+':''}${fmt(totalPnl)}</div><div class='small'>5 Scripts | 30 Days</div></div>`+html;
+        document.getElementById('btGrid').innerHTML=html; window._btData=data;
       });
     }
     function showBacktestDetail(name){
       let d=window._btData[name]; if(!d) return; let rows='';
-      d.trades.slice().reverse().forEach(t=>{ let col=t.result=='WIN'?'#00ff88':t.result=='BREAKEVEN'?'#ff9800':'#ff4444'; rows+=`<tr><td>${t.date}</td><td>${t.action} ${t.strike} ${t.opt_type}</td><td>${t.trend}<br><span class='small'>${t.breakout}</span></td><td>${fmt2(t.entry_prem)} → ${fmt2(t.exit_prem)}<br><span class='small'>Max ${fmt2(t.max_prem)} | Trail SL ${fmt2(t.trail_sl)} (${t.trail_used})</span></td><td style='color:${col};font-weight:bold'>${t.result} (${t.pnl_pct}%)</td><td style='color:${col}'>${t.pnl>=0?'+':''}${fmt(t.pnl)}</td><td class='small'>${t.exit_reason}</td></tr>`; });
-      document.getElementById('btDetail').innerHTML=`<div class='card'><b>📋 ${name} - Last 20 Trades + Trailing Detail</b><table><tr><th>Date</th><th>Trade</th><th>Trend</th><th>Premium + Trail</th><th>Result</th><th>P&L</th><th>Exit Reason</th></tr>${rows}</table></div>`; document.getElementById('btDetail').scrollIntoView({behavior:'smooth'});
+      d.trades.slice().reverse().forEach(t=>{ let col=t.result=='WIN'?'#00ff88':t.result=='BREAKEVEN'?'#ff9800':'#ff4444'; rows+=`<tr><td>${t.date}</td><td>${t.action} ${t.strike} ${t.opt_type}</td><td>${t.trend}</td><td>${fmt2(t.entry_prem)} → ${fmt2(t.exit_prem)}<br><span class='small'>Trail SL ${fmt2(t.trail_sl)}</span></td><td style='color:${col};font-weight:bold'>${t.result} (${t.pnl_pct}%)</td><td style='color:${col}'>${t.pnl>=0?'+':''}${fmt(t.pnl)}</td><td class='small'>${t.exit_reason}</td></tr>`; });
+      document.getElementById('btDetail').innerHTML=`<div class='card'><b>📋 ${name} - Last 20 Trades</b><table><tr><th>Date</th><th>Trade</th><th>Trend</th><th>Premium</th><th>Result</th><th>P&L</th><th>Exit</th></tr>${rows}</table></div>`; document.getElementById('btDetail').scrollIntoView({behavior:'smooth'});
     }
     function loadPrices(){
       fetch('/api/prices').then(r=>r.json()).then(data=>{
-        let arr=Object.values(data); let ce=0,pe=0,wait=0,usd='',strongUp=0,strongDown=0,up=0,down=0; let html='';
+        let arr=Object.values(data); let usd=''; let html='';
         arr.forEach((d,i)=>{
-          let rank=i+1; let isTop=rank==1 && d.action!='WAIT'; let badgeClass=d.action=='WAIT'?'bg-orange':'bg-green'; let badgeText=d.action=='WAIT'?'◐ WAIT':'✅ '+d.action+' - BUYING';
-          if(d.action=='BUY CE') ce++; else if(d.action=='BUY PE') pe++; else wait++;
-          if(d.trend_level==5) strongUp++; else if(d.trend_level==4) up++; else if(d.trend_level==1) strongDown++; else if(d.trend_level==2) down++; usd=d.usdinr;
+          let rank=i+1; let isTop=rank==1 && d.action!='WAIT'; let badgeClass=d.action=='WAIT'?'bg-orange':'bg-green'; let badgeText=d.action=='WAIT'?'◐ WAIT':'✅ '+d.action+' - BUYING'; usd=d.usdinr;
           let trailHtml=d.trail_levels.map(t=>`<div style='display:flex;justify-content:space-between'><span>${t.label.split(':')[0]}</span><b>Trig ${fmt2(t.trigger)} → SL ${fmt2(t.new_sl)}</b></div>`).join('');
-          html+=`<div class='script-card ${isTop?'rank1':''}'>${isTop?'<div class="rank-badge">🏆 #1 BEST</div>':`<div class="rank-badge" style="background:#333;color:#aaa">#${rank}</div>`}<div class='small'>${d.label} • OPTIONS BUYING</div><h3 style='margin:3px 0;font-size:15px'>${d.emoji} ${d.name}</h3><div class='small'>LIVE SPOT</div><div class='price green'>${fmt(d.live)}</div><div class='small'>${d.change>=0?'▲ + ':'▼ '}${fmt(Math.abs(d.change))} (${d.pct}%)</div><div class='trend-bar' style='background:${d.trend_bg};color:${d.trend_color};border:1px solid ${d.trend_color}'>${d.trend}</div><div style='text-align:center;font-size:11px'>🌍 <b style='color:${d.cond_color}'>${d.market_cond}</b></div><div style='text-align:center;font-size:10px;color:#aaa;margin-top:2px'>EMA 9: ${fmt(d.ema9)} | 21: ${fmt(d.ema21)} | 50: ${fmt(d.ema50)}</div><div style='background:#0e1117;border:1px solid #00ff88;border-radius:7px;padding:5px;margin-top:6px;text-align:center'><div class='small'>🏆 PROFIT RATIO</div><b style='color:#00ff88;font-size:15px'>${d.profit_ratio}:1</b> <span class='small'>| ${d.profit_pct}% | Conf ${d.confidence}%</span></div><div class='opt-box'><div style='text-align:center;font-size:11px;color:#c4b5fd;font-weight:bold'>🎯 ${d.moneyness} - ${d.name} ${d.strike} ${d.opt_type}</div><div style='display:flex;justify-content:space-between;margin-top:5px'><span class='small'>Spot / ATM</span><b style='font-size:12px'>${fmt(d.live)} / ${fmt(d.atm)}</b></div><div style='display:flex;justify-content:space-between'><span class='small'>💰 PREMIUM</span><b style='color:#00ff88;font-size:16px'>${fmt2(d.premium)}</b></div><div style='display:flex;justify-content:space-between'><span class='small'>Intrinsic + Time</span><span class='small'>${fmt2(d.intrinsic)} + ${fmt2(d.time_value)}</span></div><div style='display:flex;justify-content:space-between'><span class='small'>Prem TGT / SL</span><b style='font-size:12px;color:#00ff88'>${fmt2(d.prem_tgt1)} / <span style='color:#ff4444'>${fmt2(d.prem_sl)}</span></b></div><div style='display:flex;justify-content:space-between'><span class='small'>Lot ${d.lot} | Cost</span><b style='color:#ff9800'>${fmt(d.total_cost)}</b></div></div><div class='trail-box'><b>📈 TRAILING - Profit Lock Plan</b><div style='margin-top:4px'>${trailHtml}</div></div>${d.breakout?`<div class='small' style='color:#ff9800;font-weight:bold;margin-top:4px'>🔥 ${d.breakout}</div>`:''}<div class='bidask'><div class='ba ba-bid'><div class='small'>🟢 BID</div><b>${fmt(d.bid)}</b></div><div class='ba ba-ask'><div class='small'>🔴 ASK</div><b>${fmt(d.ask)}</b></div></div><div style='text-align:center'><span class='badge ${badgeClass}'>${badgeText}</span></div><div class='levels'><div class='lvl'><div class='small'>SPOT ENTRY</div><b style='color:#00ff88'>${fmt(d.entry)}</b></div><div class='lvl'><div class='small'>SPOT TGT</div><b style='color:#00ff88'>${fmt(d.tgt)}</b></div><div class='lvl'><div class='small'>SPOT SL</div><b style='color:#ff4444'>${fmt(d.sl)}</b></div></div><div class='small' style='margin-top:6px;text-align:center'>Res: ${fmt(d.resistance)} | Sup: ${fmt(d.support)} | IV ${d.iv}%</div></div>`;
+          html+=`<div class='script-card ${isTop?'rank1':''}'>${isTop?'<div class="rank-badge">🏆 #1 BEST</div>':`<div class="rank-badge" style="background:#333;color:#aaa">#${rank}</div>`}<div class='small'>${d.label} • OPTIONS BUYING</div><h3 style='margin:3px 0;font-size:15px'>${d.emoji} ${d.name}</h3><div class='small'>LIVE SPOT</div><div class='price green'>${fmt(d.live)}</div><div class='small'>${d.change>=0?'▲ + ':'▼ '}${fmt(Math.abs(d.change))} (${d.pct}%)</div><div class='trend-bar' style='background:${d.trend_bg};color:${d.trend_color};border:1px solid ${d.trend_color}'>${d.trend}</div><div style='text-align:center;font-size:11px'>🌍 <b style='color:${d.cond_color}'>${d.market_cond}</b></div><div style='text-align:center;font-size:10px;color:#aaa;margin-top:2px'>EMA 9: ${fmt(d.ema9)} | 21: ${fmt(d.ema21)} | 50: ${fmt(d.ema50)}</div><div style='background:#0e1117;border:1px solid #00ff88;border-radius:7px;padding:5px;margin-top:6px;text-align:center'><div class='small'>🏆 PROFIT RATIO</div><b style='color:#00ff88;font-size:15px'>${d.profit_ratio}:1</b> <span class='small'>| ${d.profit_pct}% | Conf ${d.confidence}%</span></div><div class='opt-box'><div style='text-align:center;font-size:11px;color:#c4b5fd;font-weight:bold'>🎯 ${d.moneyness} - ${d.name} ${d.strike} ${d.opt_type}</div><div style='display:flex;justify-content:space-between;margin-top:5px'><span class='small'>Spot / ATM</span><b style='font-size:12px'>${fmt(d.live)} / ${fmt(d.atm)}</b></div><div style='display:flex;justify-content:space-between'><span class='small'>💰 PREMIUM</span><b style='color:#00ff88;font-size:16px'>${fmt2(d.premium)}</b></div><div style='display:flex;justify-content:space-between'><span class='small'>Prem TGT / SL</span><b style='font-size:12px;color:#00ff88'>${fmt2(d.prem_tgt1)} / <span style='color:#ff4444'>${fmt2(d.prem_sl)}</span></b></div><div style='display:flex;justify-content:space-between'><span class='small'>Lot ${d.lot} | Cost</span><b style='color:#ff9800'>${fmt(d.total_cost)}</b></div></div><div class='trail-box'><b>📈 TRAILING</b><div style='margin-top:4px'>${trailHtml}</div></div>${d.breakout?`<div class='small' style='color:#ff9800;font-weight:bold;margin-top:4px'>🔥 ${d.breakout}</div>`:''}<div class='bidask'><div class='ba ba-bid'><div class='small'>🟢 BID</div><b>${fmt(d.bid)}</b></div><div class='ba ba-ask'><div class='small'>🔴 ASK</div><b>${fmt(d.ask)}</b></div></div><div style='text-align:center'><span class='badge ${badgeClass}'>${badgeText}</span></div><div class='levels'><div class='lvl'><div class='small'>SPOT ENTRY</div><b style='color:#00ff88'>${fmt(d.entry)}</b></div><div class='lvl'><div class='small'>SPOT TGT</div><b style='color:#00ff88'>${fmt(d.tgt)}</b></div><div class='lvl'><div class='small'>SPOT SL</div><b style='color:#ff4444'>${fmt(d.sl)}</b></div></div><div class='small' style='margin-top:6px;text-align:center'>Res: ${fmt(d.resistance)} | Sup: ${fmt(d.support)}</div></div>`;
         });
         document.getElementById('scriptsGrid').innerHTML=html; document.getElementById('usdinrTop').innerText='Rs '+usd;
-        let overallCond=strongUp>=2?'BULLISH STRONG 🐂🔥':up>=3?'BULLISH 🐂':strongDown>=2?'BEARISH STRONG 🐻🔻':down>=3?'BEARISH 🐻':'SIDEWAYS / MIXED ➡️'; let overallColor=overallCond.includes('BULLISH')?'#00ff88':overallCond.includes('BEARISH')?'#ff4444':'#ff9800';
-        document.getElementById('overallCond').innerText=overallCond; document.getElementById('overallCond').style.color=overallColor; document.getElementById('overallTrend').innerText=strongUp+' Strong Up | '+up+' Up | '+down+' Down | '+strongDown+' Strong Down'; document.getElementById('overallPrem').innerText=arr[0] ? arr[0].name+' '+arr[0].strike+' '+arr[0].opt_type+' @ '+fmt2(arr[0].premium) : '--';
-        let m=document.getElementById('mainSignal'); if(ce>0||pe>0){ m.innerText='✅ BUYING: '+ce+' CE BUY + '+pe+' PE BUY | '+wait+' WAIT'; m.className='green'; } else { m.innerText='◐ WAIT - NO BUYING CHANCE'; m.className='orange'; }
-        document.getElementById('mainSub').innerText='Sorted #1 = Highest Profit | ITM1 + Trailing!'; let nowIST=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata'})); document.getElementById('lastUpdate').innerText='Last Update: '+nowIST.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true})+' IST - Trailing ON ✅';
+        let nowIST=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Kolkata'})); document.getElementById('lastUpdate').innerText='Last Update: '+nowIST.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true})+' IST';
       });
     }
     function loadAI(){
       fetch('/api/ai').then(r=>r.json()).then(ai=>{
         let emoji=ai.action=='WAIT'?'◐':'✅'; document.getElementById('aiTitle').innerHTML=emoji+' AI SUGGESTS: <span style="color:#00ff88">'+ai.action+' - '+ai.script+' '+ai.strike+' '+ai.opt_type+'</span> (ITM1 + Trailing)';
-        document.getElementById('aiReason').innerText='🧠 '+ai.reason; document.getElementById('aiConf').innerText=ai.confidence+'%'; document.getElementById('aiTrend').innerText=ai.trend+' | '+ai.pct+'%'; document.getElementById('aiProfitBadge').innerText='🏆 Profit '+ai.profit_ratio+':1'; document.getElementById('aiMarketBadge').innerText='🌍 '+ai.market_cond;
-        document.getElementById('aiScript').innerText=ai.script; document.getElementById('aiOption').innerText=ai.option+' | '+ai.moneyness; document.getElementById('aiStrike').innerText=ai.strike+' '+ai.opt_type; document.getElementById('aiStrikeSub').innerText=ai.moneyness+' | ATM '+ai.atm;
-        document.getElementById('aiPremium').innerText=fmt2(ai.premium); document.getElementById('aiPremSub').innerText='Intrinsic '+fmt2(ai.intrinsic)+' + Time '+fmt2(ai.time_value); document.getElementById('aiCost').innerText=fmt(ai.total_cost); document.getElementById('aiCostSub').innerText='Lot '+ai.lot+' x '+fmt2(ai.premium);
+        document.getElementById('aiReason').innerText='🧠 '+ai.reason; document.getElementById('aiConf').innerText=ai.confidence+'%'; document.getElementById('aiTrend').innerText=ai.trend+' | '+ai.pct+'%'; document.getElementById('aiProfitBadge').innerText='🏆 Profit '+ai.profit_ratio+':1';
+        document.getElementById('aiScript').innerText=ai.script; document.getElementById('aiOption').innerText=ai.option+' | '+ai.moneyness; document.getElementById('aiStrike').innerText=ai.strike+' '+ai.opt_type;
+        document.getElementById('aiPremium').innerText=fmt2(ai.premium); document.getElementById('aiCost').innerText=fmt(ai.total_cost);
         document.getElementById('aiEntry').innerText=fmt(ai.entry); document.getElementById('aiPremTgt').innerText=fmt2(ai.prem_tgt1)+' / '+fmt2(ai.prem_tgt2); document.getElementById('aiPremSL').innerText=fmt2(ai.prem_sl); document.getElementById('aiMaxPL').innerText='+'+fmt(ai.max_profit)+' / -'+fmt(ai.max_loss);
-        let trailHtml=ai.trail_levels.map(t=>`<div>📍 Premium ${fmt2(t.trigger)} Vandha -> SL-a ${fmt2(t.new_sl)}-ku Maathunga! (${t.label})</div>`).join(''); document.getElementById('aiTrailLevels').innerHTML=trailHtml;
-        let box=document.getElementById('breakoutBox'); if(ai.breakout){ box.style.display='block'; document.getElementById('breakoutTitle').innerText='🔥 BREAKOUT: '+ai.script+' - '+ai.breakout; document.getElementById('breakoutDesc').innerText=ai.script+' '+ai.strike+' '+ai.opt_type+' Premium '+fmt2(ai.premium)+' | Entry '+fmt(ai.entry)+' | Prem TGT '+fmt2(ai.prem_tgt1)+' | Prem SL '+fmt2(ai.prem_sl)+' | Trailing Plan Keela Irukku!'; } else { box.style.display='none'; }
+        let box=document.getElementById('breakoutBox'); if(ai.breakout){ box.style.display='block'; document.getElementById('breakoutTitle').innerText='🔥 BREAKOUT: '+ai.script+' - '+ai.breakout; document.getElementById('breakoutDesc').innerText=ai.script+' '+ai.strike+' '+ai.opt_type+' Premium '+fmt2(ai.premium)+' | Entry '+fmt(ai.entry)+' | Prem TGT '+fmt2(ai.prem_tgt1)+' | Prem SL '+fmt2(ai.prem_sl); } else { box.style.display='none'; }
       });
-      fetch('/api/alerts').then(r=>r.json()).then(a=>{ document.getElementById('lastAlert').innerText=a.last_alert.time+' - '+a.last_alert.script+' '+a.last_alert.action; if(a.history && a.history.length>0){ let h='Recent Auto: '; a.history.slice(-3).forEach(x=>{ h+=' | '+x.time+' - '+x.script+' '+x.strike+' '+x.action+' @ '+x.premium; }); document.getElementById('alertHistory').innerText=h; } else { document.getElementById('alertHistory').innerText='Recent Auto: Innum Alert Illa.'; } });
     }
     loadPrices(); loadAI(); setInterval(loadPrices, 5000); setInterval(loadAI, 15000);
     </script></body></html>
     """
     return html
-
 @app.route('/test_telegram')
 def test_telegram():
     ok=send_telegram(f"✅ Test Success!\n⏰ IST: {ist_str()}"); return "✅ Sent!" if ok else "❌ Failed!"
