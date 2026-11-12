@@ -31,6 +31,47 @@ CONFIG = {
 }
 ORDER = ["NIFTY","SENSEX","CRUDEOILM","GOLDM","SILVERM"]
 SCRIPTS = {"NIFTY":"^NSEI","SENSEX":"^BSESN","CRUDEOILM":"CL=F","GOLDM":"GC=F","SILVERM":"SI=F"}
+
+# === NEW: TOP 10 HEAVYWEIGHTS - NIFTY / SENSEX ku ===
+TOP10 = [
+    ("HDFCBANK.NS","HDFC Bank"),
+    ("RELIANCE.NS","Reliance"),
+    ("ICICIBANK.NS","ICICI"),
+    ("INFY.NS","Infosys"),
+    ("TCS.NS","TCS"),
+    ("SBIN.NS","SBI"),
+    ("BHARTIARTL.NS","Bharti"),
+    ("KOTAKBANK.NS","Kotak"),
+    ("LT.NS","LT"),
+    ("HINDUNILVR.NS","HUL"),
+]
+breadth_cache = {"time": None, "up": 0, "down": 0, "details": []}
+def get_breadth():
+    # 2 Min ku Oru Time Mattum Fetch - Slow Aagaama Irukka!
+    now = ist_now()
+    if breadth_cache["time"] and (now - breadth_cache["time"]).total_seconds() < 120:
+        return breadth_cache
+    up = 0; down = 0; details = []
+    for sym, name in TOP10:
+        try:
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range=1d&interval=1m"
+            r = requests.get(url, headers={"User-Agent":"Mozilla/5.0"}, timeout=5).json()
+            meta = r["chart"]["result"][0]["meta"]
+            price = meta.get("regularMarketPrice", 0)
+            prev = meta.get("previousClose", price)
+            pct = (price - prev) / prev * 100 if prev else 0
+            if pct > 0: up += 1
+            elif pct < 0: down += 1
+            else: up += 1
+            details.append({"name": name, "pct": round(pct,2)})
+        except:
+            continue
+    breadth_cache["time"] = now
+    breadth_cache["up"] = up
+    breadth_cache["down"] = down
+    breadth_cache["details"] = details
+    return breadth_cache
+
 def convert_price(name, raw, usdinr):
     if name=="CRUDEOILM": return raw*usdinr
     if name=="GOLDM": return (raw/31.1035)*10*usdinr
@@ -90,7 +131,8 @@ def get_volume_action(price, pct, vol, avg_vol):
     if pct<0: return "Selling Pressure ↘"
     return "Normal"
 
-def calc_probability(price, pct, e9, e21, res, sup):
+# === NEW: PROBABILITY + BREADTH ===
+def calc_probability(price, pct, e9, e21, res, sup, breadth_up=0, breadth_down=0, use_breadth=False):
     call = 10; put = 10; no_trade = 10
     if e9>e21: call += 40
     elif e9<e21: put += 40
@@ -107,6 +149,13 @@ def calc_probability(price, pct, e9, e21, res, sup):
     if price>res: call += 20
     elif price<sup: put += 20
     else: no_trade += 20
+    # === BREADTH BONUS - NIFTY / SENSEX Mattum ===
+    if use_breadth:
+        if breadth_up >= 7: call += 30
+        elif breadth_down >= 7: put += 30
+        elif breadth_up >= 6: call += 15
+        elif breadth_down >= 6: put += 15
+        else: no_trade += 20
     total = call+put+no_trade
     p_call = round(call/total*100); p_put = round(put/total*100); p_no = 100-p_call-p_put
     if p_call>=p_put and p_call>=p_no: best="CALL"
@@ -141,6 +190,14 @@ def update_calls(prices):
 last_alert={"time":None,"script":"","action":""}
 def get_prices():
     usdinr=get_usdinr(); out={}
+    # Breadth - Oru Time Fetch Panni Ellarukkum Use Pannu!
+    breadth = get_breadth()
+    b_up = breadth["up"]; b_down = breadth["down"]
+    if b_up >= 7: b_text = f"🟢 {b_up} Up / {b_down} Down - Strong Buying!"
+    elif b_down >= 7: b_text = f"🔴 {b_up} Up / {b_down} Down - Strong Selling!"
+    elif b_up >= 6: b_text = f"🟢 {b_up} Up / {b_down} Down - Buying!"
+    elif b_down >= 6: b_text = f"🔴 {b_up} Up / {b_down} Down - Selling!"
+    else: b_text = f"🟠 {b_up} Up / {b_down} Down - Confused!"
     for name in ORDER:
         sym=SCRIPTS[name]
         try:
@@ -174,10 +231,11 @@ def get_prices():
             if action=="BUY CE": signal_label="CALL BUY (Bullish Alignment)"
             elif action=="BUY PE": signal_label="PUT BUY (Bearish Alignment)"
             else: signal_label="WAIT - No Alignment"
-            prob=calc_probability(price, pct, e9, e21, res20, sup20)
-            out[name]={"name":name,"live":round(price,2),"change":round(chg,2),"pct":round(pct,2),"action":action,"trend":trend,"conf":conf,"emoji":CONFIG[name]["emoji"],"strike":opt["strike"],"typ":opt["typ"],"prem":opt["prem"],"sl":opt["sl"],"tgt":opt["tgt"],"lot":opt["lot"],"entry_spot":round(price,2),"script":name,"tag":"","dte":opt["dte"],"signal_label":signal_label,"trend_struct":trend_struct,"atr":round(atr,2),"sl_dist":sl_dist,"vol_action":vol_action,"prob_call":prob["call"],"prob_put":prob["put"],"prob_no":prob["no_trade"],"prob_best":prob["best"]}
+            use_b = True if name in ["NIFTY","SENSEX"] else False
+            prob=calc_probability(price, pct, e9, e21, res20, sup20, b_up, b_down, use_b)
+            out[name]={"name":name,"live":round(price,2),"change":round(chg,2),"pct":round(pct,2),"action":action,"trend":trend,"conf":conf,"emoji":CONFIG[name]["emoji"],"strike":opt["strike"],"typ":opt["typ"],"prem":opt["prem"],"sl":opt["sl"],"tgt":opt["tgt"],"lot":opt["lot"],"entry_spot":round(price,2),"script":name,"tag":"","dte":opt["dte"],"signal_label":signal_label,"trend_struct":trend_struct,"atr":round(atr,2),"sl_dist":sl_dist,"vol_action":vol_action,"prob_call":prob["call"],"prob_put":prob["put"],"prob_no":prob["no_trade"],"prob_best":prob["best"],"breadth_up":b_up,"breadth_down":b_down,"breadth_text":b_text,"breadth_details":breadth["details"]}
         except:
-            out[name]={"name":name,"live":0,"change":0,"pct":0,"action":"WAIT","trend":"Loading","conf":0,"emoji":CONFIG[name]["emoji"],"strike":0,"typ":"CE","prem":0,"sl":0,"tgt":0,"lot":0,"entry_spot":0,"script":name,"tag":"","dte":0,"signal_label":"WAIT","trend_struct":"-","atr":0,"sl_dist":0,"vol_action":"-","prob_call":0,"prob_put":0,"prob_no":100,"prob_best":"NO TRADE"}
+            out[name]={"name":name,"live":0,"change":0,"pct":0,"action":"WAIT","trend":"Loading","conf":0,"emoji":CONFIG[name]["emoji"],"strike":0,"typ":"CE","prem":0,"sl":0,"tgt":0,"lot":0,"entry_spot":0,"script":name,"tag":"","dte":0,"signal_label":"WAIT","trend_struct":"-","atr":0,"sl_dist":0,"vol_action":"-","prob_call":0,"prob_put":0,"prob_no":100,"prob_best":"NO TRADE","breadth_up":0,"breadth_down":0,"breadth_text":"-","breadth_details":[]}
     return out
 
 def get_ai():
@@ -191,7 +249,7 @@ def get_ai():
 
 def loop():
     time.sleep(60)
-    send_telegram(f"Bot Started!")
+    send_telegram(f"Bot Started - Top 10 Breadth Added!")
     while True:
         try:
             now=ist_now(); h=now.hour+now.minute/60
@@ -214,6 +272,8 @@ threading.Thread(target=loop, daemon=True).start()
 def api_prices(): return jsonify(get_prices())
 @app.route('/api/ai')
 def api_ai(): return jsonify(get_ai())
+@app.route('/api/breadth')
+def api_breadth(): return jsonify(get_breadth())
 @app.route('/api/calls')
 def api_calls():
     try: update_calls(get_prices())
@@ -230,7 +290,7 @@ def home():
     html="""
     <html><head><title>Trading Dashboard</title><meta name='viewport' content='width=device-width, initial-scale=1'>
     <style>body{background:#0e1117;color:white;font-family:Arial;margin:0;padding:10px} .card{background:#131722;border-radius:12px;padding:12px;border:1px solid #222;margin-top:10px} .green{color:#00ff88}.red{color:#ff4444}.orange{color:#ff9800} .yellow{color:#ffeb3b}.cyan{color:#00e5ff} .small{font-size:11px;color:#aaa} .row1{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px} .row2{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px} .sc{border-radius:12px;padding:10px;border:2px solid #2a3348} table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px} th,td{padding:7px;border-bottom:1px solid #333;text-align:left} th{color:#aaa} .dash{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px} .dash td{padding:7px 8px;border:1px solid #2a3348} .dash td:first-child{color:#ccc;font-weight:bold;width:38%;background:rgba(0,0,0,0.25)} .bar{height:10px;border-radius:10px;overflow:hidden;display:flex;margin-top:6px} .bar div{height:100%} @media(max-width:700px){.row1{grid-template-columns:1fr}.row2{grid-template-columns:1fr}} </style></head><body>
-    <div class='small'>"""+now+""" | EMA 9/21 Only | Card Colour = Probability | TGT/SL Popup la Mattum</div>
+    <div class='small'>"""+now+""" | EMA 9/21 Only | Top 10 Breadth | Card Colour = Probability</div>
     <div id='row1' class='row1'></div>
     <div id='row2' class='row2'></div>
     <div class='card' style='border:2px solid #ff9800'><div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap'><b>📋 CALLS HISTORY - Call Vandha Apram Mattum</b><button onclick='clearCalls()' style='background:#333;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer'>🗑️ Clear</button></div><div id='sum' class='small' style='margin-top:4px'></div><div id='calls'><div class='small' style='padding:10px;text-align:center'>No calls yet - Signal Vandha Thaan Call Varum!</div></div></div>
@@ -242,7 +302,6 @@ def home():
       let sigColor=x.action=='BUY CE'?'#00c853':x.action=='BUY PE'?'#ff1744':'#333';
       let sigText=x.action=='WAIT'?'WAIT - No Alignment':x.signal_label;
       let probColor=x.prob_best=='CALL'?'#00c853':x.prob_best=='PUT'?'#ff1744':'#ff9800';
-      // === PROBABILITY BACKGROUND COLOUR ===
       let bg='#1a2030'; let border='#2a3348';
       let bestVal=x.prob_best=='CALL'?x.prob_call:x.prob_best=='PUT'?x.prob_put:x.prob_no;
       if(x.prob_best=='CALL' && x.prob_call>=60){ bg='#0f3d22'; border='#00c853'; }
@@ -251,7 +310,16 @@ def home():
       else if(x.prob_best=='PUT' && x.prob_put>=50){ bg='#301414'; border='#c62828'; }
       else if(x.prob_best=='NO TRADE' && x.prob_no>=50){ bg='#3a2a0a'; border='#ff9800'; }
       else if(x.prob_best=='NO TRADE'){ bg='#2a2416'; border='#8a6d2b'; }
-      return `<div class='sc' style='background:${bg};border-color:${border}'><div style='text-align:center;padding:6px'><b style='font-size:16px'>${x.emoji} ${x.name}</b><h3 style='margin:4px 0'>${fmt(x.live)}</h3><div class='small'>${x.change>=0?'▲':'▼'} ${x.pct}% | ${x.trend}</div></div><table class='dash'><tr><td>Signal</td><td style='background:${sigColor};font-weight:bold;color:white'>${x.action=='WAIT'?'◐ ':x.action=='BUY CE'?'🟢 ':'🔴 '}${sigText}</td></tr><tr><td>Trend Structure</td><td style='font-weight:bold'>${x.trend_struct}</td></tr><tr><td>ATR (14) / SL</td><td style='color:#ffeb3b;font-weight:bold'>${x.atr} pts | SL: ${x.sl_dist} pts</td></tr><tr><td>Volume Action</td><td style='color:#00e5ff;font-weight:bold'>${x.vol_action} <span class='small'>(Info Only)</span></td></tr><tr><td>Probability</td><td><b style='color:${probColor}'>${x.prob_best} - ${bestVal}%</b><br><span style='color:#00ff88'>🟢 CALL ${x.prob_call}%</span> | <span style='color:#ff4444'>🔴 PUT ${x.prob_put}%</span> | <span style='color:#ff9800'>◐ NO TRADE ${x.prob_no}%</span><div class='bar'><div style='width:${x.prob_call}%;background:#00c853'></div><div style='width:${x.prob_put}%;background:#ff1744'></div><div style='width:${x.prob_no}%;background:#ff9800'></div></div><div class='small' style='margin-top:4px'>Up: CALL | Down: PUT | Consolidation: NO TRADE</div></td></tr></table></div>`;
+      let breadthRow='';
+      if(x.name=='NIFTY' || x.name=='SENSEX'){
+        let bColor=x.breadth_up>=7?'#00ff88':x.breadth_down>=7?'#ff4444':'#ff9800';
+        let det='';
+        if(x.breadth_details && x.breadth_details.length>0){
+          det = x.breadth_details.map(d=>`${d.name} ${d.pct>=0?'+':''}${d.pct}%`).join(' | ');
+        }
+        breadthRow = `<tr><td>Top 10 Breadth</td><td style='color:${bColor};font-weight:bold'>${x.breadth_text}<br><span class='small' style='color:#aaa'>${det}</span></td></tr>`;
+      }
+      return `<div class='sc' style='background:${bg};border-color:${border}'><div style='text-align:center;padding:6px'><b style='font-size:16px'>${x.emoji} ${x.name}</b><h3 style='margin:4px 0'>${fmt(x.live)}</h3><div class='small'>${x.change>=0?'▲':'▼'} ${x.pct}% | ${x.trend}</div></div><table class='dash'><tr><td>Signal</td><td style='background:${sigColor};font-weight:bold;color:white'>${x.action=='WAIT'?'◐ ':x.action=='BUY CE'?'🟢 ':'🔴 '}${sigText}</td></tr><tr><td>Trend Structure</td><td style='font-weight:bold'>${x.trend_struct}</td></tr>${breadthRow}<tr><td>ATR (14) / SL</td><td style='color:#ffeb3b;font-weight:bold'>${x.atr} pts | SL: ${x.sl_dist} pts</td></tr><tr><td>Volume Action</td><td style='color:#00e5ff;font-weight:bold'>${x.vol_action} <span class='small'>(Info Only)</span></td></tr><tr><td>Probability</td><td><b style='color:${probColor}'>${x.prob_best} - ${bestVal}%</b><br><span style='color:#00ff88'>🟢 CALL ${x.prob_call}%</span> | <span style='color:#ff4444'>🔴 PUT ${x.prob_put}%</span> | <span style='color:#ff9800'>◐ NO TRADE ${x.prob_no}%</span><div class='bar'><div style='width:${x.prob_call}%;background:#00c853'></div><div style='width:${x.prob_put}%;background:#ff1744'></div><div style='width:${x.prob_no}%;background:#ff9800'></div></div><div class='small' style='margin-top:4px'>Up: CALL | Down: PUT | Consolidation: NO TRADE</div></td></tr></table></div>`;
     }
     function loadAll(){ fetch('/api/prices').then(r=>r.json()).then(d=>{ let order=['NIFTY','SENSEX','CRUDEOILM','GOLDM','SILVERM']; let r1=''; let r2=''; order.forEach((n,i)=>{ let x=d[n]; if(!x) return; if(i<2) r1+=cardHtml(x); else r2+=cardHtml(x); }); document.getElementById('row1').innerHTML=r1; document.getElementById('row2').innerHTML=r2; }); loadCalls(); }
     loadAll(); setInterval(loadAll,8000);
