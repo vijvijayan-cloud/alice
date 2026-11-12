@@ -71,6 +71,27 @@ def get_signal(name, closes, price, pct, e9, e21, e50, pe9, pe21, res, sup):
     if e9<e21 and price<e9 and price<e50 and bt=="DOWN" and pct<-mp*0.5: return {"action":"BUY PE","trend":"DOWN ↘","level":2}
     return {"action":"WAIT","trend":"WAIT ◐","level":3}
 
+# ATR + Volume Action - RSI Illa!
+def calc_atr(highs, lows, closes, period=14):
+    if len(closes) < period+1: return 0
+    trs=[]
+    for i in range(1, len(closes)):
+        h=highs[i]; l=lows[i]; pc=closes[i-1]
+        trs.append(max(h-l, abs(h-pc), abs(l-pc)))
+    return sum(trs[-period:])/period if len(trs)>=period else sum(trs)/len(trs)
+
+def get_volume_action(price, pct, vol, avg_vol):
+    # Photo la: Profit Taking / Unwinding
+    if vol==0 or avg_vol==0: return "Normal"
+    ratio = vol/avg_vol
+    if pct>0 and ratio<0.80: return "Profit Taking / Unwinding ⚠️"
+    if pct>0 and ratio>=1.20: return "Accumulation ✅"
+    if pct<0 and ratio>=1.20: return "Distribution / Selling 🔴"
+    if pct<0 and ratio<0.80: return "Weak Selling / No Interest"
+    if pct>0: return "Buying Interest ↗"
+    if pct<0: return "Selling Pressure ↘"
+    return "Normal"
+
 calls = []
 cid = [1]
 daily = {}
@@ -104,9 +125,11 @@ def get_prices():
             r=requests.get(url,headers={"User-Agent":"Mozilla/5.0"},timeout=8).json(); res=r["chart"]["result"][0]; meta=res["meta"]
             raw=meta.get("regularMarketPrice",0); prev_raw=meta.get("previousClose",raw)
             price=convert_price(name,raw,usdinr); prev=convert_price(name,prev_raw,usdinr); chg=price-prev; pct=chg/prev*100 if prev else 0
-            closes=[convert_price(name,c,usdinr) for c in res["indicators"]["quote"][0]["close"] if c is not None]
-            highs=[convert_price(name,h,usdinr) for h in res["indicators"]["quote"][0]["high"] if h is not None]
-            lows=[convert_price(name,l,usdinr) for l in res["indicators"]["quote"][0]["low"] if l is not None]
+            q=res["indicators"]["quote"][0]
+            closes=[convert_price(name,c,usdinr) for c in q["close"] if c is not None]
+            highs=[convert_price(name,h,usdinr) for h in q["high"] if h is not None]
+            lows=[convert_price(name,l,usdinr) for l in q["low"] if l is not None]
+            vols=[v for v in q.get("volume",[]) if v is not None]
             def ema(d,p):
                 k=2/(p+1); e=d[0]
                 for v in d[1:]: e=v*k+e*(1-k)
@@ -117,9 +140,25 @@ def get_prices():
             sig=get_signal(name,closes,price,pct,e9,e21,e50,pe9,pe21,res20,sup20)
             action=sig["action"]; trend=sig["trend"]; conf=88 if sig["level"] in [5,1] else 80 if action!="WAIT" else 45
             opt=calc_option(name,price,action if action!="WAIT" else "BUY CE")
-            out[name]={"name":name,"live":round(price,2),"change":round(chg,2),"pct":round(pct,2),"action":action,"trend":trend,"conf":conf,"emoji":CONFIG[name]["emoji"],"strike":opt["strike"],"typ":opt["typ"],"prem":opt["prem"],"sl":opt["sl"],"tgt":opt["tgt"],"lot":opt["lot"],"entry_spot":round(price,2),"script":name,"tag":opt["tag"],"dte":opt["dte"]}
+            # === NEW: Photo Dashboard - All Scripts - RSI Illa! ===
+            # Trend Structure
+            if price>e50 and e9>e21: trend_struct="Bullish Bias (Above 50 EMA)"
+            elif price<e50 and e9<e21: trend_struct="Bearish Bias (Below 50 EMA)"
+            else: trend_struct="Sideways / No Bias"
+            # ATR / SL Distance
+            atr=calc_atr(highs, lows, closes, 14)
+            sl_dist=round(atr*1.30,2)  # Photo la: ATR 62.82 -> SL 81.47 = ATR x 1.30
+            # Volume Action
+            vol_now=vols[-1] if vols else 0
+            avg_vol=sum(vols[-20:])/len(vols[-20:]) if len(vols)>=5 else 0
+            vol_action=get_volume_action(price, pct, vol_now, avg_vol)
+            # Signal Label - Photo Maadhiri
+            if action=="BUY CE": signal_label="CALL BUY (Bullish Alignment)"
+            elif action=="BUY PE": signal_label="PUT BUY (Bearish Alignment)"
+            else: signal_label="WAIT - No Alignment"
+            out[name]={"name":name,"live":round(price,2),"change":round(chg,2),"pct":round(pct,2),"action":action,"trend":trend,"conf":conf,"emoji":CONFIG[name]["emoji"],"strike":opt["strike"],"typ":opt["typ"],"prem":opt["prem"],"sl":opt["sl"],"tgt":opt["tgt"],"lot":opt["lot"],"entry_spot":round(price,2),"script":name,"tag":opt["tag"],"dte":opt["dte"],"signal_label":signal_label,"trend_struct":trend_struct,"atr":round(atr,2),"sl_dist":sl_dist,"vol_action":vol_action}
         except:
-            out[name]={"name":name,"live":0,"change":0,"pct":0,"action":"WAIT","trend":"Loading","conf":0,"emoji":CONFIG[name]["emoji"],"strike":0,"typ":"CE","prem":0,"sl":0,"tgt":0,"lot":0,"entry_spot":0,"script":name,"tag":"","dte":0}
+            out[name]={"name":name,"live":0,"change":0,"pct":0,"action":"WAIT","trend":"Loading","conf":0,"emoji":CONFIG[name]["emoji"],"strike":0,"typ":"CE","prem":0,"sl":0,"tgt":0,"lot":0,"entry_spot":0,"script":name,"tag":"","dte":0,"signal_label":"WAIT","trend_struct":"-","atr":0,"sl_dist":0,"vol_action":"-"}
     return dict(sorted(out.items(), key=lambda x: x[1]["conf"], reverse=True))
 
 def get_ai():
@@ -132,7 +171,7 @@ def get_ai():
 
 def loop():
     time.sleep(60)
-    send_telegram(f"🤖 Bot Started - Only Real AI Signals!")
+    send_telegram(f"🤖 Bot Started - Dashboard + ATR + Volume - No RSI!")
     while True:
         try:
             now=ist_now(); h=now.hour+now.minute/60
@@ -145,7 +184,6 @@ def loop():
                     if last_alert["time"]: td=(now-last_alert["time"]).total_seconds()/60
                     if not (last_alert["script"]==ai["script"] and last_alert["action"]==ai["action"] and td<45):
                         c=add_call(ai)
-                        # TGT / SL - Popup (Telegram) la Mattum! Dashboard Card la Illa!
                         ok=send_telegram(f"🚨 {ai['action']} - {ai['script']} {ai['strike']} {ai['typ']}\nEntry: Rs {ai['prem']} | TGT: Rs {ai['tgt']} | SL: Rs {ai['sl']}\nLot: {ai['lot']} | {ai['trend']} | {ai['tag']}")
                         if ok: last_alert={"time":now,"script":ai["script"],"action":ai["action"]}
             time.sleep(120)
@@ -170,9 +208,9 @@ def clear_calls():
 def home():
     now=ist_str()
     html="""
-    <html><head><title>AI Bot - Real Signals Only</title><meta name='viewport' content='width=device-width, initial-scale=1'>
-    <style>body{background:#0e1117;color:white;font-family:Arial;margin:0;padding:10px} .card{background:#131722;border-radius:12px;padding:12px;border:1px solid #222;margin-top:10px} .green{color:#00ff88}.red{color:#ff4444}.orange{color:#ff9800} .small{font-size:11px;color:#aaa} .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px} .sc{background:#1a2030;border-radius:12px;padding:12px;border:1px solid #2a3348} table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px} th,td{padding:7px;border-bottom:1px solid #333;text-align:left} th{color:#aaa} .exp{background:#ff9800;color:black;font-size:10px;font-weight:bold;padding:2px 6px;border-radius:10px} @media(max-width:600px){.grid{grid-template-columns:1fr}} </style></head><body>
-    <h2 style='margin:4px 0'>🤖 AI BOT - REAL SIGNALS ONLY</h2><div class='small'>"""+now+""" | 5 Scripts | TGT/SL - Popup la Mattum ✅</div>
+    <html><head><title>AI Trading Dashboard - No RSI</title><meta name='viewport' content='width=device-width, initial-scale=1'>
+    <style>body{background:#0e1117;color:white;font-family:Arial;margin:0;padding:10px} .card{background:#131722;border-radius:12px;padding:12px;border:1px solid #222;margin-top:10px} .green{color:#00ff88}.red{color:#ff4444}.orange{color:#ff9800} .yellow{color:#ffeb3b}.cyan{color:#00e5ff} .small{font-size:11px;color:#aaa} .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px} .sc{background:#1a2030;border-radius:12px;padding:10px;border:1px solid #2a3348} table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px} th,td{padding:7px;border-bottom:1px solid #333;text-align:left} th{color:#aaa} .exp{background:#ff9800;color:black;font-size:10px;font-weight:bold;padding:2px 6px;border-radius:10px} .dash{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px} .dash td{padding:7px 8px;border:1px solid #2a3348} .dash td:first-child{color:#ccc;font-weight:bold;width:38%;background:#1e2436} @media(max-width:600px){.grid{grid-template-columns:1fr}} </style></head><body>
+    <h2 style='margin:4px 0'>🤖 AI TRADING DASHBOARD</h2><div class='small'>"""+now+""" | 5 Scripts | RSI Removed ✅ | TGT/SL Popup la Mattum</div>
     <div class='card' style='border:2px solid #7c3aed'><div class='small'>🤖 AI SUGGEST - BEST 1 of 5</div><h2 id='aiTitle' style='margin:6px 0'>Loading...</h2><div id='aiLine' style='font-size:15px'>--</div><div id='aiDetail' style='font-size:13px;margin-top:6px;color:#e0e7ff'></div></div>
     <div id='grid' class='grid'></div>
     <div class='card' style='border:2px solid #ff9800'><div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap'><b>📋 CALLS HISTORY - Call Vandha Apram Mattum</b><button onclick='clearCalls()' style='background:#333;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer'>🗑️ Clear</button></div><div id='sum' class='small' style='margin-top:4px'></div><div id='calls'><div class='small' style='padding:10px;text-align:center'>No calls yet - AI Signal Vandha Thaan Call Varum!</div></div></div>
@@ -180,14 +218,14 @@ def home():
     function fmt(n){return 'Rs '+n.toLocaleString('en-IN',{maximumFractionDigits:0})} function fmt2(n){return 'Rs '+n.toLocaleString('en-IN',{maximumFractionDigits:2})}
     function clearCalls(){ if(confirm('Clear Calls History?')){ fetch('/api/calls/clear').then(()=>loadCalls()); } }
     function loadCalls(){ fetch('/api/calls').then(r=>r.json()).then(d=>{ let s=d.summary; document.getElementById('sum').innerText=`${s.total} Calls | ${s.wins} Win (TGT) | ${s.losses} Loss (SL) | Total P&L ${fmt(s.pnl)}`; if(d.calls.length==0){ document.getElementById('calls').innerHTML='<div class="small" style="padding:10px;text-align:center">No calls yet - AI Signal Vandha Thaan Call Varum!</div>'; return; } let rows=''; d.calls.forEach(c=>{ let col=c.pnl>=0?'#00ff88':'#ff4444'; rows+=`<tr><td><b>#${c.id} ${c.script}</b><br>${c.action} ${c.strike} ${c.typ}<br><span class='small'>${c.time} | Lot ${c.lot}</span></td><td><b>Entry<br>${fmt2(c.entry)}</b><br><span class='small'>Live ${fmt2(c.cur)}</span></td><td><b style='color:#00ff88'>TGT ${fmt2(c.tgt)}</b><br><b style='color:#ff4444'>SL ${fmt2(c.sl)}</b></td><td><b>${c.status}</b><br><span class='small'>Exit: ${c.exit=='-'?'-':fmt2(c.exit)}</span></td><td style='color:${col};font-weight:bold'>${c.pts>=0?'+':''}${c.pts} Pts<br>${c.pnl>=0?'+':''}${fmt(c.pnl)}</td></tr>`; }); document.getElementById('calls').innerHTML=`<table><tr><th>Call</th><th>Entry / Live</th><th>🎯 TGT / 🛑 SL</th><th>Status / Exit</th><th>Points / P&L</th></tr>${rows}</table>`; }); }
-    function loadAll(){ fetch('/api/ai').then(r=>r.json()).then(ai=>{ document.getElementById('aiTitle').innerText=ai.action=='WAIT'?'◐ WAIT - No Trade':`✅ ${ai.action} - ${ai.script} ${ai.strike} ${ai.typ}`; document.getElementById('aiLine').innerText=ai.action=='WAIT'?ai.trend:`${ai.script} Signal Vandhuchu - Telegram Popup Paanga!`; document.getElementById('aiDetail').innerText=ai.action=='WAIT'?'⏳ AI Signal-ku Wait Pannunga - TGT/SL Popup la Mattum Varum!':'📋 Real AI Signal - TGT/SL Telegram Popup + History la Irukku!'; }); fetch('/api/prices').then(r=>r.json()).then(d=>{ let h=''; Object.values(d).forEach(x=>{ h+=`<div class='sc'><div class='small'>${x.emoji} ${x.name} ${x.dte<=5?'<span class="exp">🔥 EXPIRY SOON</span>':''}</div><h3 style='margin:4px 0'>${fmt(x.live)}</h3><div class='small'>${x.change>=0?'▲':'▼'} ${x.pct}% | ${x.trend}</div><div style='margin-top:8px;text-align:center'><b class='${x.action=='WAIT'?'orange':'green'}'>${x.action=='WAIT'?'◐ WAIT - Signal Illa':'✅ '+x.action+' - Popup Paanga!'}</b></div></div>`; }); document.getElementById('grid').innerHTML=h; }); loadCalls(); }
+    function loadAll(){ fetch('/api/ai').then(r=>r.json()).then(ai=>{ document.getElementById('aiTitle').innerText=ai.action=='WAIT'?'◐ WAIT - No Trade':`✅ ${ai.action} - ${ai.script} ${ai.strike} ${ai.typ}`; document.getElementById('aiLine').innerText=ai.action=='WAIT'?ai.trend:`${ai.script} Signal Vandhuchu - Telegram Popup Paanga!`; document.getElementById('aiDetail').innerText=ai.action=='WAIT'?'⏳ AI Signal-ku Wait Pannunga - TGT/SL Popup la Mattum Varum!':'📋 Real AI Signal - TGT/SL Telegram Popup + History la Irukku!'; }); fetch('/api/prices').then(r=>r.json()).then(d=>{ let h=''; Object.values(d).forEach(x=>{ let sigColor=x.action=='BUY CE'?'#00c853':x.action=='BUY PE'?'#ff1744':'#333'; let sigText=x.action=='WAIT'?'WAIT - No Alignment':x.signal_label; h+=`<div class='sc'><div style='background:#4aa3ff;color:white;padding:8px;border-radius:8px 8px 0 0;text-align:center;font-weight:bold;font-size:14px'>🤖 AI TRADING DASHBOARD - ${x.emoji} ${x.name} ${x.dte<=5?'<span class="exp">🔥 EXPIRY SOON</span>':''}</div><div style='text-align:center;padding:6px;background:#131722'><h3 style='margin:2px 0'>${fmt(x.live)}</h3><div class='small'>${x.change>=0?'▲':'▼'} ${x.pct}%</div></div><table class='dash'><tr><td>Signal</td><td style='background:${sigColor};font-weight:bold;color:white'>${x.action=='WAIT'?'◐ ':x.action=='BUY CE'?'🟢 ':'🔴 '}${sigText}</td></tr><tr><td>Trend Structure</td><td style='font-weight:bold'>${x.trend_struct}</td></tr><tr><td>ATR (14) / SL</td><td style='color:#ffeb3b;font-weight:bold'>${x.atr} pts &nbsp;|&nbsp; SL Distance: ${x.sl_dist} pts</td></tr><tr><td>Volume Action</td><td style='color:#00e5ff;font-weight:bold'>${x.vol_action}</td></tr></table></div>`; }); document.getElementById('grid').innerHTML=h; }); loadCalls(); }
     loadAll(); setInterval(loadAll,8000);
     </script></body></html>
     """
     return html
 @app.route('/test_telegram')
 def t():
-    ok=send_telegram("✅ Test OK - TGT/SL Popup la Mattum!"); return "✅ Sent!" if ok else "❌ Failed"
+    ok=send_telegram("✅ Test OK - Dashboard + No RSI!"); return "✅ Sent!" if ok else "❌ Failed"
 @app.route('/debug')
 def debug(): return jsonify({"prices":get_prices(),"ai":get_ai(),"calls":calls})
 if __name__=='__main__':
