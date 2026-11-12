@@ -53,7 +53,6 @@ def est_prem(entry_spot, fut_spot, entry_prem, action, n=1):
     pc = 0.60*chg if action=="BUY CE" else -0.60*chg
     return max(entry_prem+pc-entry_prem*0.008*n, 1)
 
-# === CHASING BLOCK FIX - GOLD / SILVER MISS AAGAADHU! ===
 def get_signal(name, closes, price, pct, e9, e21, e50, pe9, pe21, res, sup):
     cfg = CONFIG[name]
     b=None; bt=""
@@ -62,13 +61,10 @@ def get_signal(name, closes, price, pct, e9, e21, e50, pe9, pe21, res, sup):
     elif pe9<=pe21 and e9>e21: b="EMA UP"; bt="UP"
     elif pe9>=pe21 and e9<e21: b="EMA DOWN"; bt="DOWN"
     mp = cfg["min_pct"]
-    # FIX 1: STRONG TREND na - Chasing Block Illa! Late Aana Kooda Entry OK!
-    # GOLD Fall Maadhiri - Fall Continue Aagum!
     if e9>e21>e50 and price>e9 and pct>mp*0.5 and bt=="UP":
         return {"action":"BUY CE","trend":"STRONG UP 🚀","level":5}
     if e9<e21<e50 and price<e9 and pct<-mp*0.5 and bt=="DOWN":
         return {"action":"BUY PE","trend":"STRONG DOWN 📉","level":1}
-    # FIX 2: Normal Breakout ku Mattum Chasing Block!
     if bt=="UP" and res>0 and (price-res)/res*100>0.60: return {"action":"WAIT","trend":"LATE ❌","level":3}
     if bt=="DOWN" and sup>0 and (sup-price)/sup*100>0.60: return {"action":"WAIT","trend":"LATE ❌","level":3}
     if e9>e21 and price>e9 and price>e50 and bt=="UP" and pct>mp*0.5: return {"action":"BUY CE","trend":"UP ↗","level":4}
@@ -182,7 +178,7 @@ def get_ai():
 
 def loop():
     time.sleep(60)
-    send_telegram(f"🤖 Bot Started\nNIFTY + SENSEX + CRUDE + GOLD + SILVER - Chasing Fix!")
+    send_telegram(f"🤖 Bot Started - Only Real AI Signals - No Manual Fake Calls!")
     while True:
         try:
             now=ist_now(); h=now.hour+now.minute/60
@@ -217,51 +213,31 @@ def clear_calls():
     calls.clear(); return jsonify({"ok":True})
 @app.route('/api/backtest_all')
 def api_bt(): return jsonify({n: backtest(n) for n in SCRIPTS})
-@app.route('/call/<name>/<action>')
-def call_script(name, action):
-    name=name.upper(); action=action.upper()
-    if name not in SCRIPTS or action not in ["CE","PE"]: return "Invalid",400
-    prices=get_prices(); d=prices.get(name)
-    if not d: return "No Price",400
-    act = "BUY CE" if action=="CE" else "BUY PE"
-    if action=="CE": prem=d["ce_prem"]; tgt=d["ce_tgt"]; sl=d["ce_sl"]; strike=d["ce_strike"]; typ="CE"
-    else: prem=d["pe_prem"]; tgt=d["pe_tgt"]; sl=d["pe_sl"]; strike=d["pe_strike"]; typ="PE"
-    data={"script":name,"action":act,"strike":strike,"typ":typ,"prem":prem,"tgt":tgt,"sl":sl,"lot":CONFIG[name]["lot"],"entry_spot":d["live"],"tag":d["tag"]}
-    c=add_call(data)
-    ok=send_telegram(f"🚨 {act} - {name} {strike} {typ}\nEntry: Rs {prem} | TGT: Rs {tgt} | SL: Rs {sl}\nLot: {CONFIG[name]['lot']} | Manual Call #{c['id']} | {d['tag']}")
-    return f"✅ Call #{c['id']} Added! {name} {strike} {typ} Entry Rs {prem} TGT Rs {tgt} SL Rs {sl}" if ok else f"✅ Call #{c['id']} Added - Telegram Failed"
-@app.route('/breakout_alert')
-def manual():
-    ai=get_ai()
-    if ai["action"]=="WAIT":
-        return "⚠️ WAIT - No Clear Signal! Card la CE / PE Button Click Panni Manual Call Edukka Mudiyum!"
-    c=add_call(ai)
-    ok=send_telegram(f"🚨 {ai['action']} - {ai['script']} {ai['strike']} {ai['typ']}\nEntry: Rs {ai['prem']} | TGT: Rs {ai['tgt']} | SL: Rs {ai['sl']}\nLot: {ai['lot']} | {ai['trend']} | {ai['tag']}")
-    return f"✅ Call #{c['id']} Sent!" if ok else "❌ Failed"
+# MANUAL CALL REMOVED - Fake Call Varaadhu! Only Auto AI Signal Thaan Call Varum!
 @app.route('/')
 def home():
     now=ist_str()
     html="""
-    <html><head><title>AI Bot - Complete</title><meta name='viewport' content='width=device-width, initial-scale=1'>
-    <style>body{background:#0e1117;color:white;font-family:Arial;margin:0;padding:10px} .card{background:#131722;border-radius:12px;padding:12px;border:1px solid #222;margin-top:10px} .btn{display:inline-block;padding:9px 14px;border-radius:8px;color:white;text-decoration:none;font-weight:bold;margin:3px;font-size:13px} .green{color:#00ff88}.red{color:#ff4444}.orange{color:#ff9800} .small{font-size:11px;color:#aaa} .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px} .sc{background:#1a2030;border-radius:12px;padding:12px;border:1px solid #2a3348} table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px} th,td{padding:7px;border-bottom:1px solid #333;text-align:left} th{color:#aaa} .exp{background:#ff9800;color:black;font-size:10px;font-weight:bold;padding:2px 6px;border-radius:10px} .callbtn{display:inline-block;padding:7px 10px;border-radius:7px;font-size:12px;font-weight:bold;text-decoration:none;color:white;margin:2px} @media(max-width:600px){.grid{grid-template-columns:1fr}} </style></head><body>
-    <h2 style='margin:4px 0'>🤖 AI BOT - COMPLETE</h2><div class='small'>"""+now+""" | 5 Scripts - Chasing Fix ✅</div>
-    <div class='card' style='border:2px solid #7c3aed'><div class='small'>🤖 AI SUGGEST - BEST 1 of 5</div><h2 id='aiTitle' style='margin:6px 0'>Loading...</h2><div id='aiLine' style='font-size:15px'>--</div><div id='aiDetail' style='font-size:13px;margin-top:6px;color:#e0e7ff'></div></div>
+    <html><head><title>AI Bot - Only Real Signals</title><meta name='viewport' content='width=device-width, initial-scale=1'>
+    <style>body{background:#0e1117;color:white;font-family:Arial;margin:0;padding:10px} .card{background:#131722;border-radius:12px;padding:12px;border:1px solid #222;margin-top:10px} .green{color:#00ff88}.red{color:#ff4444}.orange{color:#ff9800} .small{font-size:11px;color:#aaa} .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px} .sc{background:#1a2030;border-radius:12px;padding:12px;border:1px solid #2a3348} table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px} th,td{padding:7px;border-bottom:1px solid #333;text-align:left} th{color:#aaa} .exp{background:#ff9800;color:black;font-size:10px;font-weight:bold;padding:2px 6px;border-radius:10px} @media(max-width:600px){.grid{grid-template-columns:1fr}} </style></head><body>
+    <h2 style='margin:4px 0'>🤖 AI BOT - REAL SIGNALS ONLY</h2><div class='small'>"""+now+""" | 5 Scripts | No Manual Fake Calls ✅</div>
+    <div class='card' style='border:2px solid #7c3aed'><div class='small'>🤖 AI SUGGEST - BEST 1 of 5 - Auto Only</div><h2 id='aiTitle' style='margin:6px 0'>Loading...</h2><div id='aiLine' style='font-size:15px'>--</div><div id='aiDetail' style='font-size:13px;margin-top:6px;color:#e0e7ff'></div></div>
     <div id='grid' class='grid'></div>
-    <div class='card' style='border:2px solid #ff9800'><div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap'><b>📋 CALLS HISTORY - TGT / SL Details</b><button onclick='clearCalls()' style='background:#333;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer'>🗑️ Clear</button></div><div id='sum' class='small' style='margin-top:4px'></div><div id='calls'><div class='small' style='padding:10px;text-align:center'>No calls yet - Card la CE / PE Button Click Panna Call Add Aagum!</div></div></div>
+    <div class='card' style='border:2px solid #ff9800'><div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap'><b>📋 CALLS HISTORY - Real AI Calls Only</b><button onclick='clearCalls()' style='background:#333;color:white;border:none;padding:6px 10px;border-radius:6px;cursor:pointer'>🗑️ Clear</button></div><div id='sum' class='small' style='margin-top:4px'></div><div id='calls'><div class='small' style='padding:10px;text-align:center'>No calls yet - AI Signal Vandha Thaan Call Varum!</div></div></div>
     <div class='card' style='border:2px solid #009688'><b>📊 BACKTEST - 30 Days - 5 Scripts</b> <button onclick='loadBT()' style='background:#009688;color:white;border:none;padding:8px 14px;border-radius:7px;font-weight:bold;cursor:pointer;float:right'>▶️ Run</button><div id='bt' style='margin-top:10px'></div></div>
     <script>
     function fmt(n){return 'Rs '+n.toLocaleString('en-IN',{maximumFractionDigits:0})} function fmt2(n){return 'Rs '+n.toLocaleString('en-IN',{maximumFractionDigits:2})}
     function clearCalls(){ if(confirm('Clear Calls History?')){ fetch('/api/calls/clear').then(()=>loadCalls()); } }
     function loadBT(){ document.getElementById('bt').innerHTML='⏳ Running...'; fetch('/api/backtest_all').then(r=>r.json()).then(d=>{ let h=''; for(let n in d){ let x=d[n]; h+=`<div style='display:flex;justify-content:space-between;padding:8px;background:#1a2030;border-radius:8px;margin-top:6px'><b>${n}</b><span>${x.win_rate}% Win | ${x.total} Trades</span><b style='color:${x.total_pnl>=0?'#00ff88':'#ff4444'}'>${x.total_pnl>=0?'+':''}${fmt(x.total_pnl)}</b></div>`; } document.getElementById('bt').innerHTML=h; }); }
-    function loadCalls(){ fetch('/api/calls').then(r=>r.json()).then(d=>{ let s=d.summary; document.getElementById('sum').innerText=`${s.total} Calls | ${s.wins} Win (TGT) | ${s.losses} Loss (SL) | Total P&L ${fmt(s.pnl)}`; if(d.calls.length==0){ document.getElementById('calls').innerHTML='<div class="small" style="padding:10px;text-align:center">No calls yet - Card la CE / PE Button Click Panna Call Add Aagum!</div>'; return; } let rows=''; d.calls.forEach(c=>{ let col=c.pnl>=0?'#00ff88':'#ff4444'; rows+=`<tr><td><b>#${c.id} ${c.script}</b><br>${c.action} ${c.strike} ${c.typ}<br><span class='small'>${c.time} | Lot ${c.lot}</span></td><td><b>Entry<br>${fmt2(c.entry)}</b><br><span class='small'>Live ${fmt2(c.cur)}</span></td><td><b style='color:#00ff88'>TGT ${fmt2(c.tgt)}</b><br><b style='color:#ff4444'>SL ${fmt2(c.sl)}</b></td><td><b>${c.status}</b><br><span class='small'>Exit: ${c.exit=='-'?'-':fmt2(c.exit)}</span></td><td style='color:${col};font-weight:bold'>${c.pts>=0?'+':''}${c.pts} Pts<br>${c.pnl>=0?'+':''}${fmt(c.pnl)}</td></tr>`; }); document.getElementById('calls').innerHTML=`<table><tr><th>Call</th><th>Entry / Live</th><th>🎯 TGT / 🛑 SL</th><th>Status / Exit</th><th>Points / P&L</th></tr>${rows}</table>`; }); }
-    function loadAll(){ fetch('/api/ai').then(r=>r.json()).then(ai=>{ document.getElementById('aiTitle').innerText=ai.action=='WAIT'?'◐ WAIT - No Trade':`✅ ${ai.action} - ${ai.script} ${ai.strike} ${ai.typ}`; document.getElementById('aiLine').innerText=ai.action=='WAIT'?ai.trend:`Entry Rs ${ai.prem} | TGT Rs ${ai.tgt} | SL Rs ${ai.sl} | Lot ${ai.lot}`; document.getElementById('aiDetail').innerText=ai.action=='WAIT'?'💡 Card la CE / PE Button Click Panni Manual Call Edukkalam!':'📋 Call Auto History la Add Aagum - TGT/SL Hit Aana Telegram Varum!'; }); fetch('/api/prices').then(r=>r.json()).then(d=>{ let h=''; Object.values(d).forEach(x=>{ h+=`<div class='sc'><div class='small'>${x.emoji} ${x.name} ${x.dte<=5?'<span class="exp">🔥 EXPIRY SOON</span>':''}</div><h3 style='margin:4px 0'>${fmt(x.live)}</h3><div class='small'>${x.change>=0?'▲':'▼'} ${x.pct}% | ${x.trend}</div><div style='margin-top:8px;font-size:13px;line-height:1.6'><b>🟢 CE:</b> ${x.ce_strike} CE | Entry <b style='color:#00ff88'>${fmt2(x.ce_prem)}</b><br>🎯 TGT <b style='color:#00ff88'>${fmt2(x.ce_tgt)}</b> | 🛑 SL <b style='color:#ff4444'>${fmt2(x.ce_sl)}</b><br><b>🔴 PE:</b> ${x.pe_strike} PE | Entry <b style='color:#00ff88'>${fmt2(x.pe_prem)}</b><br>🎯 TGT <b style='color:#00ff88'>${fmt2(x.pe_tgt)}</b> | 🛑 SL <b style='color:#ff4444'>${fmt2(x.pe_sl)}</b></div><div class='small' style='margin-top:4px'>Lot ${x.lot} | Expiry ${x.dte} Days | ${x.tag}</div><div style='margin-top:8px;text-align:center'><a class='callbtn' style='background:#00c853' href='/call/${x.name}/CE'>📩 CE Call</a><a class='callbtn' style='background:#ff1744' href='/call/${x.name}/PE'>📩 PE Call</a></div><div style='margin-top:6px;text-align:center'><b class='${x.action=='WAIT'?'orange':'green'}'>${x.action=='WAIT'?'◐ WAIT':'✅ '+x.action}</b></div></div>`; }); document.getElementById('grid').innerHTML=h; }); loadCalls(); }
+    function loadCalls(){ fetch('/api/calls').then(r=>r.json()).then(d=>{ let s=d.summary; document.getElementById('sum').innerText=`${s.total} Calls | ${s.wins} Win (TGT) | ${s.losses} Loss (SL) | Total P&L ${fmt(s.pnl)}`; if(d.calls.length==0){ document.getElementById('calls').innerHTML='<div class="small" style="padding:10px;text-align:center">No calls yet - AI Signal Vandha Thaan Call Varum!</div>'; return; } let rows=''; d.calls.forEach(c=>{ let col=c.pnl>=0?'#00ff88':'#ff4444'; rows+=`<tr><td><b>#${c.id} ${c.script}</b><br>${c.action} ${c.strike} ${c.typ}<br><span class='small'>${c.time} | Lot ${c.lot}</span></td><td><b>Entry<br>${fmt2(c.entry)}</b><br><span class='small'>Live ${fmt2(c.cur)}</span></td><td><b style='color:#00ff88'>TGT ${fmt2(c.tgt)}</b><br><b style='color:#ff4444'>SL ${fmt2(c.sl)}</b></td><td><b>${c.status}</b><br><span class='small'>Exit: ${c.exit=='-'?'-':fmt2(c.exit)}</span></td><td style='color:${col};font-weight:bold'>${c.pts>=0?'+':''}${c.pts} Pts<br>${c.pnl>=0?'+':''}${fmt(c.pnl)}</td></tr>`; }); document.getElementById('calls').innerHTML=`<table><tr><th>Call</th><th>Entry / Live</th><th>🎯 TGT / 🛑 SL</th><th>Status / Exit</th><th>Points / P&L</th></tr>${rows}</table>`; }); }
+    function loadAll(){ fetch('/api/ai').then(r=>r.json()).then(ai=>{ document.getElementById('aiTitle').innerText=ai.action=='WAIT'?'◐ WAIT - No Trade':`✅ ${ai.action} - ${ai.script} ${ai.strike} ${ai.typ}`; document.getElementById('aiLine').innerText=ai.action=='WAIT'?ai.trend:`Entry Rs ${ai.prem} | TGT Rs ${ai.tgt} | SL Rs ${ai.sl} | Lot ${ai.lot}`; document.getElementById('aiDetail').innerText=ai.action=='WAIT'?'⏳ AI Signal-ku Wait Pannunga - Manual Call Illa - Fake Call Varaadhu!':'📋 Real AI Signal - Call Auto History la Add Aagum - Telegram Varum!'; }); fetch('/api/prices').then(r=>r.json()).then(d=>{ let h=''; Object.values(d).forEach(x=>{ h+=`<div class='sc'><div class='small'>${x.emoji} ${x.name} ${x.dte<=5?'<span class="exp">🔥 EXPIRY SOON</span>':''}</div><h3 style='margin:4px 0'>${fmt(x.live)}</h3><div class='small'>${x.change>=0?'▲':'▼'} ${x.pct}% | ${x.trend}</div><div style='margin-top:8px;font-size:13px;line-height:1.6'><b>🟢 CE:</b> ${x.ce_strike} CE | Entry <b style='color:#00ff88'>${fmt2(x.ce_prem)}</b><br>🎯 TGT <b style='color:#00ff88'>${fmt2(x.ce_tgt)}</b> | 🛑 SL <b style='color:#ff4444'>${fmt2(x.ce_sl)}</b><br><b>🔴 PE:</b> ${x.pe_strike} PE | Entry <b style='color:#00ff88'>${fmt2(x.pe_prem)}</b><br>🎯 TGT <b style='color:#00ff88'>${fmt2(x.pe_tgt)}</b> | 🛑 SL <b style='color:#ff4444'>${fmt2(x.pe_sl)}</b></div><div class='small' style='margin-top:4px'>Lot ${x.lot} | Expiry ${x.dte} Days | ${x.tag}</div><div style='margin-top:8px;text-align:center'><b class='${x.action=='WAIT'?'orange':'green'}'>${x.action=='WAIT'?'◐ WAIT - Signal Illa':'✅ '+x.action+' - Auto Call Varum!'}</b></div></div>`; }); document.getElementById('grid').innerHTML=h; }); loadCalls(); }
     loadAll(); setInterval(loadAll,8000);
     </script></body></html>
     """
     return html
 @app.route('/test_telegram')
 def t():
-    ok=send_telegram("✅ Test OK - Complete Code - Chasing Fix!"); return "✅ Sent!" if ok else "❌ Failed"
+    ok=send_telegram("✅ Test OK - Only Real AI Signals!"); return "✅ Sent!" if ok else "❌ Failed"
 @app.route('/debug')
 def debug(): return jsonify({"prices":get_prices(),"ai":get_ai(),"calls":calls})
 if __name__=='__main__':
