@@ -163,6 +163,28 @@ calls = []
 cid = [1]
 daily = {}
 signal_time_cache = {}
+
+# ✅ RETEST ZONE ALERT - ALL SCRIPTS - PUDHU!
+last_retest_alert = {"time": None, "script": "", "action": ""}
+def check_retest_zone(name, price, e21, action, entry_spot):
+    if e21 == 0 or price == 0:
+        return None
+    dist_ema = abs(price - e21) / e21 * 100
+    # Retest Zone = Price - EMA21 ku 0.30% Kulla Irundha
+    if dist_ema > 0.30:
+        return None
+    # Against-a Vandha Thaan Retest - Entry Spot la Irundhu Against-a Poirukkanum
+    if action == "BUY CE":
+        # CE Call - Price Keezha Vandhu EMA21 kitta Vandha - Retest!
+        # Price - Entry Spot ku Keezha Irundha Thaan Against
+        if price < entry_spot and price >= e21 * 0.997:
+            return f"⚠️ RETEST ZONE - {name}\nTrend: UP - BUY CE Running\nLive: Rs {round(price,2)} | Entry Spot: Rs {round(entry_spot,2)}\nEMA21: Rs {round(e21,2)} Kitta Vandhuduchu!\nAgainst-a Vandhu Retest Pannudhu - Hold / Watch Pannunga!\nTime: {ist_short()}"
+    if action == "BUY PE":
+        # PE Call - Price Mela Vandhu EMA21 kitta Vandha - Retest!
+        if price > entry_spot and price <= e21 * 1.003:
+            return f"⚠️ RETEST ZONE - {name}\nTrend: DOWN - BUY PE Running\nLive: Rs {round(price,2)} | Entry Spot: Rs {round(entry_spot,2)}\nEMA21: Rs {round(e21,2)} Kitta Vandhuduchu!\nAgainst-a Vandhu Retest Pannudhu - Hold / Watch Pannunga!\nTime: {ist_short()}"
+    return None
+
 def add_call(data):
     c = {"id":cid[0],"time":ist_short(),"script":data["script"],"action":data["action"],"strike":data["strike"],"typ":data["typ"],"entry":data["prem"],"tgt":data["tgt"],"sl":data["sl"],"lot":data["lot"],"entry_spot":data["entry_spot"],"tag":"","status":"🟢 RUNNING","cur":data["prem"],"pts":0,"pnl":0,"exit":"-"}
     cid[0]+=1; calls.insert(0,c)
@@ -242,9 +264,9 @@ def get_prices():
                 signal_time_cache[f"{name}_last_key"] = cur_key
                 signal_time_cache[name] = now_str
             sig_time = signal_time_cache.get(name, now_str)
-            out[name]={"name":name,"live":round(price,2),"change":round(chg,2),"pct":round(pct,2),"action":action,"trend":trend,"conf":conf,"emoji":CONFIG[name]["emoji"],"strike":opt["strike"],"typ":opt["typ"],"prem":opt["prem"],"sl":opt["sl"],"tgt":opt["tgt"],"lot":opt["lot"],"entry_spot":round(price,2),"script":name,"tag":"","dte":opt["dte"],"signal_label":signal_label,"trend_struct":trend_struct,"atr":round(atr,2),"sl_dist":sl_dist,"vol_action":vol_action,"prob_call":prob["call"],"prob_put":prob["put"],"prob_no":prob["no_trade"],"prob_best":prob["best"],"breadth_up":b_up,"breadth_down":b_down,"breadth_text":b_text,"breadth_details":breadth["details"],"signal_time":sig_time,"updated_time":now_str}
+            out[name]={"name":name,"live":round(price,2),"change":round(chg,2),"pct":round(pct,2),"action":action,"trend":trend,"conf":conf,"emoji":CONFIG[name]["emoji"],"strike":opt["strike"],"typ":opt["typ"],"prem":opt["prem"],"sl":opt["sl"],"tgt":opt["tgt"],"lot":opt["lot"],"entry_spot":round(price,2),"script":name,"tag":"","dte":opt["dte"],"signal_label":signal_label,"trend_struct":trend_struct,"atr":round(atr,2),"sl_dist":sl_dist,"vol_action":vol_action,"prob_call":prob["call"],"prob_put":prob["put"],"prob_no":prob["no_trade"],"prob_best":prob["best"],"breadth_up":b_up,"breadth_down":b_down,"breadth_text":b_text,"breadth_details":breadth["details"],"signal_time":sig_time,"updated_time":now_str,"e9":round(e9,2),"e21":round(e21,2),"res20":round(res20,2),"sup20":round(sup20,2)}
         except:
-            out[name]={"name":name,"live":0,"change":0,"pct":0,"action":"WAIT","trend":"Loading","conf":0,"emoji":CONFIG[name]["emoji"],"strike":0,"typ":"CE","prem":0,"sl":0,"tgt":0,"lot":0,"entry_spot":0,"script":name,"tag":"","dte":0,"signal_label":"WAIT","trend_struct":"-","atr":0,"sl_dist":0,"vol_action":"-","prob_call":0,"prob_put":0,"prob_no":100,"prob_best":"NO TRADE","breadth_up":0,"breadth_down":0,"breadth_text":"-","breadth_details":[],"signal_time":ist_short(),"updated_time":ist_short()}
+            out[name]={"name":name,"live":0,"change":0,"pct":0,"action":"WAIT","trend":"Loading","conf":0,"emoji":CONFIG[name]["emoji"],"strike":0,"typ":"CE","prem":0,"sl":0,"tgt":0,"lot":0,"entry_spot":0,"script":name,"tag":"","dte":0,"signal_label":"WAIT","trend_struct":"-","atr":0,"sl_dist":0,"vol_action":"-","prob_call":0,"prob_put":0,"prob_no":100,"prob_best":"NO TRADE","breadth_up":0,"breadth_down":0,"breadth_text":"-","breadth_details":[],"signal_time":ist_short(),"updated_time":ist_short(),"e9":0,"e21":0,"res20":0,"sup20":0}
     return out
 
 def get_ai():
@@ -264,6 +286,23 @@ def loop():
             now=ist_now(); h=now.hour+now.minute/60
             if 9.0<=h<=23.5 and now.weekday()!=6:
                 ai=get_ai(); update_calls(ai["all"])
+                # ✅ RETEST ZONE ALERT - ALL SCRIPTS - RUNNING CALL IRUNDHA MATTUM!
+                for c in list(calls):
+                    if "RUNNING" not in c["status"]: continue
+                    d = ai["all"].get(c["script"])
+                    if not d or d.get("live",0)==0: continue
+                    e21_val = d.get("e21",0)
+                    if e21_val==0: continue
+                    msg = check_retest_zone(c["script"], d["live"], e21_val, c["action"], c["entry_spot"])
+                    if msg:
+                        td = 9999
+                        if last_retest_alert["time"]:
+                            td = (now - last_retest_alert["time"]).total_seconds()/60
+                        # Same Script + Same Action + 30 Min Kulla - Alert Vendaam - Spam Aagadhu!
+                        if not (last_retest_alert["script"]==c["script"] and last_retest_alert["action"]==c["action"] and td<30):
+                            ok = send_telegram(msg)
+                            if ok:
+                                last_retest_alert.update({"time":now,"script":c["script"],"action":c["action"]})
                 if ai["action"] in ["BUY CE","BUY PE"] and ai["conf"]>=80:
                     today=now.strftime('%d-%m-%Y'); k=f"{today}_{ai['script']}"
                     if daily.get(k,0) >= CONFIG[ai["script"]]["max_day"]: time.sleep(120); continue
